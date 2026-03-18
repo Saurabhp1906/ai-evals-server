@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 # ---------------------------------------------------------------------------
 
 PLAN_LIMITS: dict[str, dict[str, int | None]] = {
-    "free": {"prompts": 1, "scorers": 1, "playgrounds": 1, "datasets": None, "connections": None},
-    "plus": {"prompts": 10, "scorers": 10, "playgrounds": 10, "datasets": None, "connections": None},
-    "pro":  {"prompts": 20, "scorers": 20, "playgrounds": 20, "datasets": None, "connections": None},
+    "free": {"prompts": 1, "scorers": 1, "playgrounds": 1, "datasets": 2},
+    "plus": {"prompts": 10, "scorers": 10, "playgrounds": 10, "datasets": 20},
+    "pro":  {"prompts": 20, "scorers": 20, "playgrounds": 20, "datasets": 50},
 }
 
 PLAN_LABELS = {

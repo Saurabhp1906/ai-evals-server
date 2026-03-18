@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
+from ..auth.limits import enforce_limit
 from ..database import get_db
 from ..models.orm import DatasetORM, DatasetRowORM
 from ..models.schemas import Dataset, DatasetCreate, DatasetRowCreate, DatasetRowUpdate, DatasetUpdate
@@ -15,6 +16,7 @@ def create_dataset(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Dataset:
+    enforce_limit(db, current_user.org_id, current_user.org_plan, "datasets", DatasetORM)
     dataset = DatasetORM(**body.model_dump(), org_id=current_user.org_id)
     db.add(dataset)
     db.commit()

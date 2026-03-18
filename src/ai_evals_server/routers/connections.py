@@ -62,6 +62,17 @@ def create_connection(
         if not body.azure_deployment:
             raise HTTPException(status_code=422, detail="azure_deployment is required for azure_openai connections")
 
+    existing = (
+        db.query(ConnectionORM)
+        .filter(ConnectionORM.org_id == current_user.org_id, ConnectionORM.type == body.type)
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A {body.type.value} connection already exists. Only 1 connection per provider type is allowed.",
+        )
+
     _verify_connection(body)
 
     data = body.model_dump()
