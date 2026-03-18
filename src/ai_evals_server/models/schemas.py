@@ -179,8 +179,6 @@ class PlaygroundRunRequest(BaseModel):
     prompt_id: str
     dataset_id: str
     scorer_id: str
-    # Optional: which connection to use for each call.
-    # Falls back to ANTHROPIC_API_KEY env var when omitted.
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     max_output_tokens: int | None = None

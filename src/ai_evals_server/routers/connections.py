@@ -115,7 +115,25 @@ def update_connection(
     conn = db.get(ConnectionORM, connection_id)
     if not conn or conn.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="Connection not found")
-    data = body.model_dump(exclude_none=True)
+    data = {k: v for k, v in body.model_dump(exclude_none=True).items() if v != ""}
+
+    # Verify only if something other than name is changing
+    actually_changed = {
+        k: v for k, v in data.items()
+        if k != "name" and v != getattr(conn, k, None)
+    }
+    if actually_changed:
+        verify_body = ConnectionCreate(
+            name=conn.name,
+            type=conn.type,
+            api_key=data.get("api_key") or decrypt_api_key(conn.api_key),
+            azure_endpoint=data.get("azure_endpoint") or conn.azure_endpoint,
+            azure_deployment=data.get("azure_deployment") or conn.azure_deployment,
+            azure_api_version=data.get("azure_api_version") or conn.azure_api_version,
+            base_url=data.get("base_url") or conn.base_url,
+        )
+        _verify_connection(verify_body)
+
     if "api_key" in data:
         data["api_key"] = encrypt_api_key(data["api_key"])
     for field, value in data.items():

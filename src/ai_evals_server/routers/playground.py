@@ -1,5 +1,4 @@
 import json
-import os
 from typing import Protocol
 from fastapi import APIRouter, Depends, HTTPException
 import anthropic
@@ -126,19 +125,9 @@ def _client_from_connection(conn: ConnectionORM) -> ClaudeClient | OpenAIClient 
     )
 
 
-def _default_claude_client() -> ClaudeClient:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="No connection specified and ANTHROPIC_API_KEY env var is not set",
-        )
-    return ClaudeClient(api_key=api_key)
-
-
 def _resolve_client(connection_id: str | None, db: Session) -> ClaudeClient | OpenAIClient | AzureOpenAIClient:
     if not connection_id:
-        return _default_claude_client()
+        raise HTTPException(status_code=400, detail="A connection must be selected to run.")
     conn = db.get(ConnectionORM, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail=f"Connection '{connection_id}' not found")
@@ -154,10 +143,10 @@ _DEFAULT_MODELS = {
 
 def _resolve_model(connection_id: str | None, db: Session) -> str:
     if not connection_id:
-        return _DEFAULT_MODELS[ConnectionType.claude]
+        raise HTTPException(status_code=400, detail="A connection must be selected to run.")
     conn = db.get(ConnectionORM, connection_id)
     if not conn:
-        return _DEFAULT_MODELS[ConnectionType.claude]
+        raise HTTPException(status_code=404, detail=f"Connection '{connection_id}' not found")
     if conn.type == ConnectionType.azure_openai and conn.azure_deployment:
         return conn.azure_deployment
     return _DEFAULT_MODELS.get(conn.type, "claude-sonnet-4-6")
