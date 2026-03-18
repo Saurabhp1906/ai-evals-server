@@ -49,10 +49,13 @@ def get_current_user(
         org = OrganizationORM(name=f"{name}'s workspace", plan="free")
         db.add(org)
         db.flush()
-        membership = MembershipORM(org_id=org.id, user_id=user_id, role="admin")
+        membership = MembershipORM(org_id=org.id, user_id=user_id, email=email, role="admin")
         db.add(membership)
         db.commit()
         db.refresh(membership)
+    elif membership.email != email:
+        membership.email = email
+        db.commit()
 
     org = db.get(OrganizationORM, membership.org_id)
     if not org:

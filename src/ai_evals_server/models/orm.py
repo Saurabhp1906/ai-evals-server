@@ -44,6 +44,7 @@ class MembershipORM(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Supabase auth UUID
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
     role: Mapped[str] = mapped_column(String, nullable=False, default="member")  # admin | member
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

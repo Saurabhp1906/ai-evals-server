@@ -34,6 +34,7 @@ class OrgUpdate(BaseModel):
 
 class MemberResponse(BaseModel):
     user_id: str
+    email: str | None
     role: str
     created_at: datetime
 
@@ -72,7 +73,7 @@ def list_members(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[MemberResponse]:
     members = db.query(MembershipORM).filter(MembershipORM.org_id == current_user.org_id).all()
-    return [MemberResponse(user_id=m.user_id, role=m.role, created_at=m.created_at) for m in members]
+    return [MemberResponse(user_id=m.user_id, email=m.email, role=m.role, created_at=m.created_at) for m in members]
 
 
 @router.delete("/me/members/{user_id}", status_code=204)
