@@ -1,9 +1,7 @@
 import os
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import prompts, datasets, scorers, playground, playgrounds, connections, organizations, invites
-from .database.migrations import run_migrations
 
 _ALLOWED_ORIGINS = [
     o.strip()
@@ -11,16 +9,10 @@ _ALLOWED_ORIGINS = [
     if o.strip()
 ]
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    run_migrations()
-    yield
-
 app = FastAPI(
     title="AI Evals Server",
     description="An AI evaluation platform",
     version="0.1.0",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -51,8 +43,11 @@ def main() -> None:
     import uvicorn
     from .database.migrations import run_migrations
 
+    print("Running database migrations...")
     run_migrations()
-    uvicorn.run("ai_evals_server.main:app", host="0.0.0.0", port=8000, reload=True)
+    print("Migrations complete, starting server...")
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
 
 
 if __name__ == "__main__":
