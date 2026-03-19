@@ -102,6 +102,7 @@ class PromptORM(Base):
         String, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
     )
     max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")

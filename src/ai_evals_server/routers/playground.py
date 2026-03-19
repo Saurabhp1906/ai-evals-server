@@ -254,9 +254,8 @@ def _client_from_connection(
     plain_key = decrypt_api_key(conn.api_key)
     if conn.type == ConnectionType.claude:
         return ClaudeClient(api_key=plain_key)
-    if conn.type in (ConnectionType.openai, ConnectionType.openai_responses):
-        # Default based on connection type; override if explicitly requested
-        responses = (conn.type == ConnectionType.openai_responses) if use_responses_api is None else use_responses_api
+    if conn.type == ConnectionType.openai:
+        responses = False if use_responses_api is None else use_responses_api
         if responses:
             return OpenAIResponsesClient(api_key=plain_key, base_url=conn.base_url)
         return OpenAIChatClient(api_key=plain_key, base_url=conn.base_url)
@@ -285,12 +284,11 @@ def _resolve_client(connection_id: str | None, db: Session, use_responses_api: b
 _DEFAULT_MODELS = {
     ConnectionType.claude: "claude-sonnet-4-6",
     ConnectionType.openai: "gpt-4o",
-    ConnectionType.openai_responses: "gpt-4o",
     ConnectionType.azure_openai: "",
 }
 
 
-def _resolve_model(connection_id: str | None, db: Session) -> str:
+def _resolve_model(connection_id: str | None, db: Session, model_override: str | None = None) -> str:
     if not connection_id:
         raise HTTPException(status_code=400, detail="A connection must be selected to run.")
     conn = db.get(ConnectionORM, connection_id)
@@ -298,7 +296,7 @@ def _resolve_model(connection_id: str | None, db: Session) -> str:
         raise HTTPException(status_code=404, detail=f"Connection '{connection_id}' not found")
     if conn.type == ConnectionType.azure_openai and conn.azure_deployment:
         return conn.azure_deployment
-    return _DEFAULT_MODELS.get(conn.type, "claude-sonnet-4-6")
+    return model_override or _DEFAULT_MODELS.get(conn.type, "claude-sonnet-4-6")
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +348,7 @@ def run_single(
     connection_id = body.connection_id or prompt.connection_id
     use_responses_api = body.use_responses_api if body.use_responses_api is not None else prompt.use_responses_api
     client = _resolve_client(connection_id, db, use_responses_api=use_responses_api)
-    model = _resolve_model(connection_id, db)
+    model = _resolve_model(connection_id, db, model_override=prompt.model)
     max_tokens = body.max_output_tokens or prompt.max_output_tokens
     user_message = _resolve_template(prompt.prompt_string, body.input, body.variables)
 
@@ -403,7 +401,7 @@ def run_row(
     scorer_connection_id = body.scorer_connection_id or scorer.connection_id or prompt_connection_id
     prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
     scorer_client = _resolve_client(scorer_connection_id, db)
-    prompt_model = _resolve_model(prompt_connection_id, db)
+    prompt_model = _resolve_model(prompt_connection_id, db, model_override=prompt.model)
     scorer_model = _resolve_model(scorer_connection_id, db)
 
     output = ""
@@ -463,7 +461,7 @@ def run_playground(
     scorer_connection_id = body.scorer_connection_id or scorer.connection_id or prompt_connection_id
     prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
     scorer_client = _resolve_client(scorer_connection_id, db)
-    prompt_model = _resolve_model(prompt_connection_id, db)
+    prompt_model = _resolve_model(prompt_connection_id, db, model_override=prompt.model)
     scorer_model = _resolve_model(scorer_connection_id, db)
 
     results: list[RowEvalResult] = []

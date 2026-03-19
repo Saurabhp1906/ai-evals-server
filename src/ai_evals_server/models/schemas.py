@@ -15,6 +15,7 @@ class PromptCreate(BaseModel):
     use_responses_api: bool = False
     connection_id: str | None = None
     max_output_tokens: int | None = None
+    model: str | None = None  # optional model override (used for OpenAI connections)
 
 
 class PromptUpdate(BaseModel):
@@ -24,6 +25,7 @@ class PromptUpdate(BaseModel):
     use_responses_api: bool | None = None
     connection_id: str | None = None
     max_output_tokens: int | None = None
+    model: str | None = None
 
 
 class Prompt(PromptCreate):
@@ -117,8 +119,7 @@ class Scorer(ScorerCreate):
 
 class ConnectionType(str, Enum):
     claude = "claude"
-    openai = "openai"                       # Chat Completions API
-    openai_responses = "openai_responses"   # Responses API (Plus+)
+    openai = "openai"           # Chat Completions API (also supports Responses API via use_responses_api flag)
     azure_openai = "azure_openai"           # Chat Completions API
 
 
