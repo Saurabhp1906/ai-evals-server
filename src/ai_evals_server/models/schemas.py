@@ -33,6 +33,19 @@ class Prompt(PromptCreate):
     created_at: datetime
 
 
+class PromptVersionCreate(BaseModel):
+    prompt_string: str
+    version_number: int
+
+
+class PromptVersion(PromptVersionCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    prompt_id: str
+    created_at: datetime
+
+
 # ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
@@ -80,6 +93,7 @@ class ScorerCreate(BaseModel):
     prompt_string: str
     model: str = "claude-sonnet-4-6"
     connection_id: str | None = None
+    pass_threshold: int = 7
 
 
 class ScorerUpdate(BaseModel):
@@ -87,6 +101,7 @@ class ScorerUpdate(BaseModel):
     prompt_string: str | None = None
     model: str | None = None
     connection_id: str | None = None
+    pass_threshold: int | None = None
 
 
 class Scorer(ScorerCreate):
@@ -251,6 +266,8 @@ class PlaygroundRunSchema(BaseModel):
     id: str
     playground_id: str
     created_at: datetime
+    prompt_version_id: str | None = None
+    prompt_version_number: int | None = None
     rows: list[PlaygroundRunRowSchema] = Field(default_factory=list)
 
 
@@ -270,3 +287,5 @@ class PlaygroundSchema(BaseModel):
 
 class SaveRunRequest(BaseModel):
     rows: list[RowEvalResult]
+    prompt_version_id: str | None = None
+    prompt_version_number: int | None = None

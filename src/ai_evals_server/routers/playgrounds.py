@@ -94,7 +94,11 @@ def save_run(
     if not pg or pg.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="Playground not found")
 
-    run = PlaygroundRunORM(playground_id=playground_id)
+    run = PlaygroundRunORM(
+        playground_id=playground_id,
+        prompt_version_id=body.prompt_version_id,
+        prompt_version_number=body.prompt_version_number,
+    )
     db.add(run)
     db.flush()
 

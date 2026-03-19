@@ -105,6 +105,12 @@ class PromptORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
+    versions: Mapped[list["PromptVersionORM"]] = relationship(
+        "PromptVersionORM",
+        back_populates="prompt",
+        cascade="all, delete-orphan",
+        order_by="PromptVersionORM.version_number",
+    )
 
 
 class DatasetORM(Base):
@@ -148,6 +154,7 @@ class ScorerORM(Base):
     connection_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
     )
+    pass_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
@@ -187,6 +194,8 @@ class PlaygroundRunORM(Base):
     playground_id: Mapped[str] = mapped_column(
         String, ForeignKey("playgrounds.id", ondelete="CASCADE"), nullable=False
     )
+    prompt_version_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    prompt_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     playground: Mapped["PlaygroundORM"] = relationship("PlaygroundORM", back_populates="runs")
@@ -213,3 +222,17 @@ class PlaygroundRunRowORM(Base):
     elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     run: Mapped["PlaygroundRunORM"] = relationship("PlaygroundRunORM", back_populates="rows")
+
+
+class PromptVersionORM(Base):
+    __tablename__ = "prompt_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    prompt_id: Mapped[str] = mapped_column(
+        String, ForeignKey("prompts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    prompt_string: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    prompt: Mapped["PromptORM"] = relationship("PromptORM", back_populates="versions")
