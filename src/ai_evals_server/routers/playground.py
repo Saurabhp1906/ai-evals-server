@@ -372,8 +372,9 @@ def run_scorer(
     if not scorer:
         raise HTTPException(status_code=404, detail="Scorer not found")
 
-    client = _resolve_client(body.connection_id, db)
-    model = _resolve_model(body.connection_id, db)
+    connection_id = body.connection_id or scorer.connection_id
+    client = _resolve_client(connection_id, db)
+    model = _resolve_model(connection_id, db)
     scorer_message = _resolve_template(scorer.prompt_string, body.input, body.variables, output=body.output)
 
     try:
@@ -399,7 +400,7 @@ def run_row(
         raise HTTPException(status_code=404, detail="Scorer not found")
 
     prompt_connection_id = body.prompt_connection_id or prompt.connection_id
-    scorer_connection_id = body.scorer_connection_id or prompt_connection_id
+    scorer_connection_id = body.scorer_connection_id or scorer.connection_id or prompt_connection_id
     prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
     scorer_client = _resolve_client(scorer_connection_id, db)
     prompt_model = _resolve_model(prompt_connection_id, db)
@@ -459,7 +460,7 @@ def run_playground(
         raise HTTPException(status_code=400, detail="Dataset has no rows")
 
     prompt_connection_id = body.prompt_connection_id or prompt.connection_id
-    scorer_connection_id = body.scorer_connection_id or prompt_connection_id
+    scorer_connection_id = body.scorer_connection_id or scorer.connection_id or prompt_connection_id
     prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
     scorer_client = _resolve_client(scorer_connection_id, db)
     prompt_model = _resolve_model(prompt_connection_id, db)

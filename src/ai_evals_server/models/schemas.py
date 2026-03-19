@@ -79,12 +79,14 @@ class ScorerCreate(BaseModel):
     # Template: use {input} for original input, {output} for prompt output.
     prompt_string: str
     model: str = "claude-sonnet-4-6"
+    connection_id: str | None = None
 
 
 class ScorerUpdate(BaseModel):
     name: str | None = None
     prompt_string: str | None = None
     model: str | None = None
+    connection_id: str | None = None
 
 
 class Scorer(ScorerCreate):

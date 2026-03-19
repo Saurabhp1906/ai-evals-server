@@ -145,7 +145,12 @@ class ScorerORM(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     prompt_string: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(String, default="claude-sonnet-4-6")
+    connection_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
 
 
 class PlaygroundORM(Base):
