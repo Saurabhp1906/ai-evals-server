@@ -67,20 +67,20 @@ OPENAI_TOOL_DEFINITIONS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 class LLMClient(Protocol):
-    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str: ...
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str: ...
 
 
 class ClaudeClient:
     def __init__(self, api_key: str) -> None:
         self._client = anthropic.Anthropic(api_key=api_key)
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
         kwargs: dict = {
             "model": model,
             "max_tokens": max_tokens if max_tokens is not None else 1024,
             "messages": [{"role": "user", "content": user_message}],
         }
-        tool_defs = [CLAUDE_TOOL_DEFINITIONS[t] for t in tools if t in CLAUDE_TOOL_DEFINITIONS]
+        tool_defs = [CLAUDE_TOOL_DEFINITIONS[t] for t in (tools or []) if t in CLAUDE_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
             kwargs["tool_choice"] = {"type": "required"}
@@ -101,7 +101,7 @@ class ClaudeClient:
             "max_tokens": max_tokens if max_tokens is not None else 1024,
             "messages": [{"role": "user", "content": user_message}],
         }
-        tool_defs = [CLAUDE_TOOL_DEFINITIONS[t] for t in tools if t in CLAUDE_TOOL_DEFINITIONS]
+        tool_defs = [CLAUDE_TOOL_DEFINITIONS[t] for t in (tools or []) if t in CLAUDE_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
             kwargs["tool_choice"] = {"type": "required"}
@@ -134,7 +134,7 @@ class OpenAIChatClient:
     def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self._client = openai_lib.OpenAI(api_key=api_key, base_url=base_url)
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
         kwargs: dict = {
             "model": model,
             "messages": [{"role": "user", "content": user_message}],
@@ -157,14 +157,14 @@ class OpenAIResponsesClient:
     def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self._client = openai_lib.OpenAI(api_key=api_key, base_url=base_url)
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
         kwargs: dict = {
             "model": model,
             "input": user_message,
         }
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
-        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in tools if t in OPENAI_TOOL_DEFINITIONS]
+        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
             kwargs["tool_choice"] = "required"
@@ -175,7 +175,7 @@ class OpenAIResponsesClient:
         kwargs: dict = {"model": model, "input": user_message}
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
-        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in tools if t in OPENAI_TOOL_DEFINITIONS]
+        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
             kwargs["tool_choice"] = "required"
@@ -193,7 +193,7 @@ class AzureOpenAIChatClient:
         )
         self._deployment = azure_deployment
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
         kwargs: dict = {
             "model": self._deployment,
             "messages": [{"role": "user", "content": user_message}],
@@ -217,14 +217,14 @@ class AzureOpenAIResponsesClient:
         )
         self._deployment = azure_deployment
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
         kwargs: dict = {
             "model": self._deployment,
             "input": user_message,
         }
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
-        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in tools if t in OPENAI_TOOL_DEFINITIONS]
+        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
             kwargs["tool_choice"] = "required"
@@ -235,7 +235,7 @@ class AzureOpenAIResponsesClient:
         kwargs: dict = {"model": self._deployment, "input": user_message}
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
-        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in tools if t in OPENAI_TOOL_DEFINITIONS]
+        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
             kwargs["tool_choice"] = "required"
@@ -377,7 +377,7 @@ def run_scorer(
     scorer_message = _resolve_template(scorer.prompt_string, body.input, body.variables, output=body.output)
 
     try:
-        score = client.complete(model=model, user_message=scorer_message, max_tokens=1024, tools=[])
+        score = client.complete(model=model, user_message=scorer_message)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -421,12 +421,7 @@ def run_row(
         )
 
         scorer_message = _resolve_template(scorer.prompt_string, raw_input, variables, output=output)
-        score = scorer_client.complete(
-            model=scorer_model,
-            user_message=scorer_message,
-            max_tokens=1024,
-            tools=[],
-        )
+        score = scorer_client.complete(model=scorer_model, user_message=scorer_message)
     except HTTPException:
         raise
     except Exception as exc:
