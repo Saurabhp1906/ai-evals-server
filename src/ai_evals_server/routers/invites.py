@@ -38,6 +38,8 @@ def create_invite(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_admin),
 ) -> InviteResponse:
+    if current_user.org_plan == "free":
+        raise HTTPException(status_code=403, detail="Inviting teammates requires a Plus or Pro plan.")
     if body.role not in ("admin", "member"):
         raise HTTPException(status_code=422, detail="role must be 'admin' or 'member'")
 

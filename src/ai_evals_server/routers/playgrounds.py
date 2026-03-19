@@ -88,6 +88,8 @@ def save_run(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlaygroundRunSchema:
+    if current_user.org_plan == "free":
+        raise HTTPException(status_code=403, detail="Run history requires a Plus or Pro plan.")
     pg = db.get(PlaygroundORM, playground_id)
     if not pg or pg.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="Playground not found")

@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,6 +12,7 @@ class PromptCreate(BaseModel):
     name: str
     prompt_string: str  # use {input} or ${varName} as placeholders
     tools: list[str] = Field(default_factory=list)  # e.g. ["web_search"]
+    use_responses_api: bool = False
     connection_id: str | None = None
     max_output_tokens: int | None = None
 
@@ -19,6 +21,7 @@ class PromptUpdate(BaseModel):
     name: str | None = None
     prompt_string: str | None = None
     tools: list[str] | None = None
+    use_responses_api: bool | None = None
     connection_id: str | None = None
     max_output_tokens: int | None = None
 
@@ -97,8 +100,10 @@ class Scorer(ScorerCreate):
 
 class ConnectionType(str, Enum):
     claude = "claude"
-    openai = "openai"
-    azure_openai = "azure_openai"
+    openai = "openai"                       # Chat Completions API
+    openai_responses = "openai_responses"   # Responses API (Plus+)
+    azure_openai = "azure_openai"           # Chat Completions API
+
 
 
 class ConnectionCreate(BaseModel):
@@ -146,10 +151,12 @@ class SingleRunRequest(BaseModel):
     variables: dict[str, str] = Field(default_factory=dict)
     connection_id: str | None = None
     max_output_tokens: int | None = None
+    use_responses_api: bool | None = None  # if None, falls back to prompt.use_responses_api
 
 
 class SingleRunResult(BaseModel):
     output: str
+    raw_output: Any = None
 
 
 class ScorerRunRequest(BaseModel):

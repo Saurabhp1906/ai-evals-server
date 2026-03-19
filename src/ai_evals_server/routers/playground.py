@@ -13,6 +13,37 @@ from ..models.schemas import ConnectionType, PlaygroundRunRequest, PlaygroundRun
 
 router = APIRouter(prefix="/playground", tags=["playground"])
 
+
+def _serialize_response(response: object) -> dict:
+    """Serialize an SDK response object to a plain JSON-compatible dict."""
+    errors: list[str] = []
+    # Pydantic v2 — JSON-safe dict
+    try:
+        return response.model_dump(mode="json")  # type: ignore[attr-defined]
+    except Exception as e:
+        errors.append(f"model_dump: {e}")
+    # Pydantic v2 — via JSON string
+    try:
+        return json.loads(response.model_dump_json())  # type: ignore[attr-defined]
+    except Exception as e:
+        errors.append(f"model_dump_json: {e}")
+    # Pydantic v1
+    try:
+        return json.loads(response.json())  # type: ignore[attr-defined]
+    except Exception as e:
+        errors.append(f"json(): {e}")
+    # __dict__ fallback
+    try:
+        return json.loads(json.dumps(response.__dict__, default=str))
+    except Exception as e:
+        errors.append(f"__dict__: {e}")
+    # vars() fallback
+    try:
+        return json.loads(json.dumps(vars(response), default=str))
+    except Exception as e:
+        errors.append(f"vars(): {e}")
+    return {"_error": "could not serialize response", "_details": errors}
+
 # ---------------------------------------------------------------------------
 # Tool definitions (Claude-native built-ins)
 # ---------------------------------------------------------------------------
@@ -61,10 +92,58 @@ class ClaudeClient:
                 parts.append(block.text)
             elif isinstance(block, dict) and block.get("type") == "text":
                 parts.append(block["text"])
-        return "\n".join(parts).strip()
+        text = "\n".join(parts).strip()
+        return text
+
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+        kwargs: dict = {
+            "model": model,
+            "max_tokens": max_tokens if max_tokens is not None else 1024,
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        tool_defs = [CLAUDE_TOOL_DEFINITIONS[t] for t in tools if t in CLAUDE_TOOL_DEFINITIONS]
+        if tool_defs:
+            kwargs["tools"] = tool_defs
+            kwargs["tool_choice"] = {"type": "required"}
+        response = self._client.messages.create(**kwargs)
+        parts = []
+        for block in response.content:
+            if hasattr(block, "text"):
+                parts.append(block.text)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block["text"])
+        return "\n".join(parts).strip(), _serialize_response(response)
 
 
-class OpenAIClient:
+class OpenAIChatClient:
+    """OpenAI Chat Completions API — available on all plans."""
+    def __init__(self, api_key: str, base_url: str | None = None) -> None:
+        self._client = openai_lib.OpenAI(api_key=api_key, base_url=base_url)
+
+    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str:
+        kwargs: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        # web_search not supported in Chat Completions — ignore tools silently
+        response = self._client.chat.completions.create(**kwargs)
+        return (response.choices[0].message.content or "").strip()
+
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+        kwargs: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        response = self._client.chat.completions.create(**kwargs)
+        return (response.choices[0].message.content or "").strip(), _serialize_response(response)
+
+
+class OpenAIResponsesClient:
+    """OpenAI Responses API — Plus/Pro plans only."""
     def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self._client = openai_lib.OpenAI(api_key=api_key, base_url=base_url)
 
@@ -82,8 +161,48 @@ class OpenAIClient:
         response = self._client.responses.create(**kwargs)
         return (response.output_text or "").strip()
 
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+        kwargs: dict = {"model": model, "input": user_message}
+        if max_tokens is not None:
+            kwargs["max_output_tokens"] = max_tokens
+        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in tools if t in OPENAI_TOOL_DEFINITIONS]
+        if tool_defs:
+            kwargs["tools"] = tool_defs
+            kwargs["tool_choice"] = "required"
+        response = self._client.responses.create(**kwargs)
+        return (response.output_text or "").strip(), _serialize_response(response)
 
-class AzureOpenAIClient:
+
+class AzureOpenAIChatClient:
+    """Azure OpenAI Chat Completions API."""
+    def __init__(self, api_key: str, azure_endpoint: str, azure_deployment: str, api_version: str) -> None:
+        self._client = openai_lib.AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=azure_endpoint,
+            api_version=api_version,
+        )
+        self._deployment = azure_deployment
+
+    def complete(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> str:
+        kwargs: dict = {
+            "model": self._deployment,
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        response = self._client.chat.completions.create(**kwargs)
+        return (response.choices[0].message.content or "").strip()
+
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+        kwargs: dict = {"model": self._deployment, "messages": [{"role": "user", "content": user_message}]}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        response = self._client.chat.completions.create(**kwargs)
+        return (response.choices[0].message.content or "").strip(), _serialize_response(response)
+
+
+class AzureOpenAIResponsesClient:
+    """Azure OpenAI Responses API."""
     def __init__(self, api_key: str, azure_endpoint: str, azure_deployment: str, api_version: str) -> None:
         self._client = openai_lib.AzureOpenAI(
             api_key=api_key,
@@ -106,37 +225,61 @@ class AzureOpenAIClient:
         response = self._client.responses.create(**kwargs)
         return (response.output_text or "").strip()
 
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+        kwargs: dict = {"model": self._deployment, "input": user_message}
+        if max_tokens is not None:
+            kwargs["max_output_tokens"] = max_tokens
+        tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in tools if t in OPENAI_TOOL_DEFINITIONS]
+        if tool_defs:
+            kwargs["tools"] = tool_defs
+            kwargs["tool_choice"] = "required"
+        response = self._client.responses.create(**kwargs)
+        return (response.output_text or "").strip(), _serialize_response(response)
+
 
 # ---------------------------------------------------------------------------
 # Client factory
 # ---------------------------------------------------------------------------
 
-def _client_from_connection(conn: ConnectionORM) -> ClaudeClient | OpenAIClient | AzureOpenAIClient:
+def _client_from_connection(
+    conn: ConnectionORM,
+    use_responses_api: bool | None = None,
+) -> ClaudeClient | OpenAIChatClient | OpenAIResponsesClient | AzureOpenAIChatClient | AzureOpenAIResponsesClient:
     plain_key = decrypt_api_key(conn.api_key)
     if conn.type == ConnectionType.claude:
         return ClaudeClient(api_key=plain_key)
-    if conn.type == ConnectionType.openai:
-        return OpenAIClient(api_key=plain_key, base_url=conn.base_url)
-    return AzureOpenAIClient(
+    if conn.type in (ConnectionType.openai, ConnectionType.openai_responses):
+        # Default based on connection type; override if explicitly requested
+        responses = (conn.type == ConnectionType.openai_responses) if use_responses_api is None else use_responses_api
+        if responses:
+            return OpenAIResponsesClient(api_key=plain_key, base_url=conn.base_url)
+        return OpenAIChatClient(api_key=plain_key, base_url=conn.base_url)
+    # azure_openai — default chat completions; override to responses if requested
+    responses = False if use_responses_api is None else use_responses_api
+    azure_kwargs = dict(
         api_key=plain_key,
         azure_endpoint=conn.azure_endpoint or "",
         azure_deployment=conn.azure_deployment or "",
         api_version=conn.azure_api_version,
     )
+    if responses:
+        return AzureOpenAIResponsesClient(**azure_kwargs)
+    return AzureOpenAIChatClient(**azure_kwargs)
 
 
-def _resolve_client(connection_id: str | None, db: Session) -> ClaudeClient | OpenAIClient | AzureOpenAIClient:
+def _resolve_client(connection_id: str | None, db: Session, use_responses_api: bool | None = None):
     if not connection_id:
         raise HTTPException(status_code=400, detail="A connection must be selected to run.")
     conn = db.get(ConnectionORM, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail=f"Connection '{connection_id}' not found")
-    return _client_from_connection(conn)
+    return _client_from_connection(conn, use_responses_api=use_responses_api)
 
 
 _DEFAULT_MODELS = {
     ConnectionType.claude: "claude-sonnet-4-6",
     ConnectionType.openai: "gpt-4o",
+    ConnectionType.openai_responses: "gpt-4o",
     ConnectionType.azure_openai: "",
 }
 
@@ -199,17 +342,18 @@ def run_single(
         raise HTTPException(status_code=404, detail="Prompt not found")
 
     connection_id = body.connection_id or prompt.connection_id
-    client = _resolve_client(connection_id, db)
+    use_responses_api = body.use_responses_api if body.use_responses_api is not None else prompt.use_responses_api
+    client = _resolve_client(connection_id, db, use_responses_api=use_responses_api)
     model = _resolve_model(connection_id, db)
     max_tokens = body.max_output_tokens or prompt.max_output_tokens
     user_message = _resolve_template(prompt.prompt_string, body.input, body.variables)
 
     try:
-        output = client.complete(model=model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
+        output, raw_output = client.complete_raw(model=model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return SingleRunResult(output=output)
+    return SingleRunResult(output=output, raw_output=raw_output)
 
 
 @router.post("/run-scorer", response_model=ScorerRunResult)
@@ -249,10 +393,11 @@ def run_row(
         raise HTTPException(status_code=404, detail="Scorer not found")
 
     prompt_connection_id = body.prompt_connection_id or prompt.connection_id
-    prompt_client = _resolve_client(prompt_connection_id, db)
-    scorer_client = _resolve_client(body.scorer_connection_id, db)
+    scorer_connection_id = body.scorer_connection_id or prompt_connection_id
+    prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
+    scorer_client = _resolve_client(scorer_connection_id, db)
     prompt_model = _resolve_model(prompt_connection_id, db)
-    scorer_model = _resolve_model(body.scorer_connection_id, db)
+    scorer_model = _resolve_model(scorer_connection_id, db)
 
     output = ""
     score = ""
@@ -313,10 +458,11 @@ def run_playground(
         raise HTTPException(status_code=400, detail="Dataset has no rows")
 
     prompt_connection_id = body.prompt_connection_id or prompt.connection_id
-    prompt_client = _resolve_client(prompt_connection_id, db)
-    scorer_client = _resolve_client(body.scorer_connection_id, db)
+    scorer_connection_id = body.scorer_connection_id or prompt_connection_id
+    prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
+    scorer_client = _resolve_client(scorer_connection_id, db)
     prompt_model = _resolve_model(prompt_connection_id, db)
-    scorer_model = _resolve_model(body.scorer_connection_id, db)
+    scorer_model = _resolve_model(scorer_connection_id, db)
 
     results: list[RowEvalResult] = []
 

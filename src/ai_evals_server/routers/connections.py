@@ -24,6 +24,13 @@ def _verify_connection(body: ConnectionCreate) -> None:
             )
         elif body.type == ConnectionType.openai:
             client = openai_lib.OpenAI(api_key=body.api_key, base_url=body.base_url)
+            client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+            )
+        elif body.type == ConnectionType.openai_responses:
+            client = openai_lib.OpenAI(api_key=body.api_key, base_url=body.base_url)
             client.responses.create(model="gpt-4o-mini", input="hi", max_output_tokens=1)
         elif body.type == ConnectionType.azure_openai:
             client = openai_lib.AzureOpenAI(

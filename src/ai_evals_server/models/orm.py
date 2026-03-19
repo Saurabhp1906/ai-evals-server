@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -97,6 +97,7 @@ class PromptORM(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     prompt_string: Mapped[str] = mapped_column(Text, nullable=False)
     tools: Mapped[list] = mapped_column(JSON, default=list)
+    use_responses_api: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     connection_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True
     )
