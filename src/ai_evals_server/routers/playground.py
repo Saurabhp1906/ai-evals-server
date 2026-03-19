@@ -115,6 +115,20 @@ class ClaudeClient:
         return "\n".join(parts).strip(), _serialize_response(response)
 
 
+def _openai_chat_create(client, kwargs: dict, max_tokens: int | None):
+    """Call chat.completions.create, falling back to max_completion_tokens if max_tokens is rejected."""
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    try:
+        return client.chat.completions.create(**kwargs)
+    except openai_lib.BadRequestError as e:
+        if max_tokens is not None and "max_completion_tokens" in str(e):
+            kwargs.pop("max_tokens", None)
+            kwargs["max_completion_tokens"] = max_tokens
+            return client.chat.completions.create(**kwargs)
+        raise
+
+
 class OpenAIChatClient:
     """OpenAI Chat Completions API — available on all plans."""
     def __init__(self, api_key: str, base_url: str | None = None) -> None:
@@ -125,10 +139,8 @@ class OpenAIChatClient:
             "model": model,
             "messages": [{"role": "user", "content": user_message}],
         }
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
         # web_search not supported in Chat Completions — ignore tools silently
-        response = self._client.chat.completions.create(**kwargs)
+        response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip()
 
     def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
@@ -136,9 +148,7 @@ class OpenAIChatClient:
             "model": model,
             "messages": [{"role": "user", "content": user_message}],
         }
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
-        response = self._client.chat.completions.create(**kwargs)
+        response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip(), _serialize_response(response)
 
 
@@ -188,16 +198,12 @@ class AzureOpenAIChatClient:
             "model": self._deployment,
             "messages": [{"role": "user", "content": user_message}],
         }
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
-        response = self._client.chat.completions.create(**kwargs)
+        response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip()
 
     def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
         kwargs: dict = {"model": self._deployment, "messages": [{"role": "user", "content": user_message}]}
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
-        response = self._client.chat.completions.create(**kwargs)
+        response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip(), _serialize_response(response)
 
 
