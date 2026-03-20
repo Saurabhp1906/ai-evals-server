@@ -158,6 +158,7 @@ def accept_invite(
     new_membership = MembershipORM(
         org_id=invite.org_id,
         user_id=current_user.id,
+        email=current_user.email,
         role=invite.role,
     )
     db.add(new_membership)
