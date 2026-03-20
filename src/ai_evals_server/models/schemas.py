@@ -284,6 +284,9 @@ class PlaygroundRunSchema(BaseModel):
     created_at: datetime
     prompt_version_id: str | None = None
     prompt_version_number: int | None = None
+    prompt_id: str | None = None
+    dataset_id: str | None = None
+    scorer_id: str | None = None
     rows: list[PlaygroundRunRowSchema] = Field(default_factory=list)
 
 
@@ -306,3 +309,6 @@ class SaveRunRequest(BaseModel):
     rows: list[RowEvalResult]
     prompt_version_id: str | None = None
     prompt_version_number: int | None = None
+    prompt_id: str | None = None
+    dataset_id: str | None = None
+    scorer_id: str | None = None

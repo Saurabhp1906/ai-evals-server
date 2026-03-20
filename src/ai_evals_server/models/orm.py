@@ -201,6 +201,9 @@ class PlaygroundRunORM(Base):
     )
     prompt_version_id: Mapped[str | None] = mapped_column(String, nullable=True)
     prompt_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    dataset_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    scorer_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     playground: Mapped["PlaygroundORM"] = relationship("PlaygroundORM", back_populates="runs")

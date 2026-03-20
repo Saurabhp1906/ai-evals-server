@@ -98,6 +98,9 @@ def save_run(
         playground_id=playground_id,
         prompt_version_id=body.prompt_version_id,
         prompt_version_number=body.prompt_version_number,
+        prompt_id=body.prompt_id,
+        dataset_id=body.dataset_id,
+        scorer_id=body.scorer_id,
     )
     db.add(run)
     db.flush()
