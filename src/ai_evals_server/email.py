@@ -22,17 +22,19 @@ def send_invite_email(to_email: str, org_name: str, token: str) -> None:
 <html>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f9fafb; margin: 0; padding: 40px 0;">
   <div style="max-width: 480px; margin: 0 auto; background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">
-    <div style="background: #4f46e5; padding: 24px 32px;">
-      <h1 style="margin: 0; font-size: 20px; font-weight: 600;"><span style="color: white;">Eval</span><span style="color: #fdba74;">Peak</span></h1>
+    <div style="background: #111827; padding: 24px 32px;">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px;">
+        <span style="color: white;">Eval</span><span style="color: #f97316;">Peak</span>
+      </h1>
     </div>
     <div style="padding: 32px;">
-      <h2 style="margin: 0 0 8px; font-size: 18px; color: #111827;">You're invited</h2>
+      <h2 style="margin: 0 0 8px; font-size: 18px; color: #111827; font-weight: 600;">You're invited</h2>
       <p style="margin: 0 0 24px; color: #6b7280; font-size: 14px; line-height: 1.6;">
         You've been invited to join <strong style="color: #111827;">{org_name}</strong> on EvalPeak.
         Click the button below to accept.
       </p>
       <a href="{invite_url}"
-         style="display: inline-block; background: #4f46e5; color: white; text-decoration: none;
+         style="display: inline-block; background: #111827; color: white; text-decoration: none;
                 padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">
         Accept invitation
       </a>
