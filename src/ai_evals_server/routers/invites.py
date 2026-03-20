@@ -152,6 +152,7 @@ def accept_invite(
             old_org = db.get(OrganizationORM, old_membership.org_id)
             if old_org:
                 db.delete(old_org)
+        db.flush()  # ensure DELETE is sent before INSERT below
 
     # Join the invited org
     new_membership = MembershipORM(
