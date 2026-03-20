@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import prompts, datasets, scorers, playground, playgrounds, connections, organizations, invites
+from .routers import prompts, datasets, scorers, playground, playgrounds, connections, organizations, invites, mcp_servers
 
 _ALLOWED_ORIGINS = [
     o.strip()
@@ -31,6 +31,7 @@ app.include_router(datasets.router)
 app.include_router(scorers.router)
 app.include_router(playground.router)
 app.include_router(playgrounds.router)
+app.include_router(mcp_servers.router)
 
 
 

@@ -176,6 +176,25 @@ class ConnectionResponse(BaseModel):
 # Playground
 # ---------------------------------------------------------------------------
 
+class McpServerCreate(BaseModel):
+    name: str
+    url: str
+
+
+class McpServerUpdate(BaseModel):
+    name: str | None = None
+    url: str | None = None
+
+
+class McpServerSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    url: str
+    created_at: datetime
+
+
 class SingleRunRequest(BaseModel):
     prompt_id: str
     input: str = ""
@@ -183,6 +202,7 @@ class SingleRunRequest(BaseModel):
     connection_id: str | None = None
     max_output_tokens: int | None = None
     use_responses_api: bool | None = None  # if None, falls back to prompt.use_responses_api
+    mcp_server_url: str | None = None  # resolved URL passed directly from frontend
 
 
 class SingleRunResult(BaseModel):
@@ -212,6 +232,7 @@ class RowRunRequest(BaseModel):
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     max_output_tokens: int | None = None
+    mcp_server_url: str | None = None  # resolved URL passed directly from frontend
 
 
 class PlaygroundRunRequest(BaseModel):
@@ -222,6 +243,7 @@ class PlaygroundRunRequest(BaseModel):
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     max_output_tokens: int | None = None
+    mcp_server_url: str | None = None  # resolved URL passed directly from frontend
 
 
 class RowEvalResult(BaseModel):
@@ -232,6 +254,7 @@ class RowEvalResult(BaseModel):
     score: str            # Scorer LLM response
     error: str | None = None
     elapsed_ms: int | None = None
+    tool_calls: list[dict] = Field(default_factory=list)
 
 
 class PlaygroundRunResult(BaseModel):
@@ -252,6 +275,7 @@ class PlaygroundCreate(BaseModel):
     scorer_id: str | None = None
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
+    mcp_server_id: str | None = None
 
 
 class PlaygroundUpdate(BaseModel):
@@ -261,6 +285,7 @@ class PlaygroundUpdate(BaseModel):
     scorer_id: str | None = None
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
+    mcp_server_id: str | None = None
 
 
 class PlaygroundRunRowSchema(BaseModel):
@@ -274,6 +299,7 @@ class PlaygroundRunRowSchema(BaseModel):
     score: str
     error: str | None = None
     elapsed_ms: int | None = None
+    tool_calls: list[dict] = Field(default_factory=list)
 
 
 class PlaygroundRunSchema(BaseModel):
@@ -300,6 +326,7 @@ class PlaygroundSchema(BaseModel):
     scorer_id: str | None
     prompt_connection_id: str | None
     scorer_connection_id: str | None
+    mcp_server_id: str | None = None
     created_at: datetime
     created_by_email: str | None = None
     runs: list[PlaygroundRunSchema] = Field(default_factory=list)

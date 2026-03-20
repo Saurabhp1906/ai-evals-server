@@ -167,6 +167,16 @@ class ScorerORM(Base):
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
 
 
+class McpServerORM(Base):
+    __tablename__ = "mcp_servers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class PlaygroundORM(Base):
     __tablename__ = "playgrounds"
 
@@ -184,6 +194,9 @@ class PlaygroundORM(Base):
     )
     prompt_connection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     scorer_connection_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    mcp_server_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("mcp_servers.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -231,6 +244,7 @@ class PlaygroundRunRowORM(Base):
     score: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tool_calls: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     run: Mapped["PlaygroundRunORM"] = relationship("PlaygroundRunORM", back_populates="rows")
 

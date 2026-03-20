@@ -20,6 +20,7 @@ dependencies = [
     "sqlalchemy>=2.0.48",
     "uvicorn>=0.42.0",
     "resend>=2.25.0",
+    "mcp>=1.0.0",
 ]
 
 [project.scripts]

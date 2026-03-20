@@ -115,6 +115,7 @@ def save_run(
             score=row.score,
             error=row.error,
             elapsed_ms=row.elapsed_ms,
+            tool_calls=row.tool_calls or None,
         ))
 
     db.commit()

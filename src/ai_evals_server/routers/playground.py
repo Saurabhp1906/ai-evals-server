@@ -1,8 +1,11 @@
+import asyncio
 import json
 from typing import Protocol
 from fastapi import APIRouter, Depends, HTTPException
 import anthropic
 import openai as openai_lib
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
@@ -300,6 +303,91 @@ def _resolve_model(connection_id: str | None, db: Session, model_override: str |
 
 
 # ---------------------------------------------------------------------------
+# MCP tool call runner
+# ---------------------------------------------------------------------------
+
+async def _mcp_complete_async(
+    openai_client: openai_lib.OpenAI | openai_lib.AzureOpenAI,
+    deployment: str,
+    user_message: str,
+    max_tokens: int | None,
+    mcp_url: str,
+) -> tuple[str, list[dict]]:
+    tool_calls_trace: list[dict] = []
+
+    async with streamablehttp_client(mcp_url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools_result = await session.list_tools()
+
+            openai_tools = [
+                {
+                    "type": "function",
+                    "name": t.name,
+                    "description": t.description or "",
+                    "parameters": t.inputSchema,
+                }
+                for t in tools_result.tools
+            ]
+
+            kwargs: dict = {"model": deployment, "input": user_message, "tools": openai_tools}
+            if max_tokens:
+                kwargs["max_output_tokens"] = max_tokens
+
+            response = openai_client.responses.create(**kwargs)
+
+            while True:
+                function_calls = [item for item in response.output if item.type == "function_call"]
+                if not function_calls:
+                    break
+
+                tool_results = []
+                for fc in function_calls:
+                    args = json.loads(fc.arguments)
+                    result = await session.call_tool(fc.name, args)
+                    result_text = "\n".join(
+                        block.text for block in result.content if hasattr(block, "text")
+                    )
+                    tool_calls_trace.append({"tool": fc.name, "args": args, "result": result_text})
+                    tool_results.append({
+                        "type": "function_call_output",
+                        "call_id": fc.call_id,
+                        "output": result_text,
+                    })
+
+                response = openai_client.responses.create(
+                    model=deployment,
+                    previous_response_id=response.id,
+                    input=tool_results,
+                )
+
+            return (response.output_text or "").strip(), tool_calls_trace
+
+
+def _run_with_mcp(
+    conn: ConnectionORM,
+    user_message: str,
+    max_tokens: int | None,
+    mcp_url: str,
+) -> tuple[str, list[dict]]:
+    """Bridge sync → async MCP tool call loop using the Responses API."""
+    plain_key = decrypt_api_key(conn.api_key)
+    if conn.type == ConnectionType.azure_openai:
+        openai_client: openai_lib.OpenAI | openai_lib.AzureOpenAI = openai_lib.AzureOpenAI(
+            api_key=plain_key,
+            azure_endpoint=conn.azure_endpoint or "",
+            api_version=conn.azure_api_version,
+        )
+        deployment = conn.azure_deployment or ""
+    elif conn.type == ConnectionType.openai:
+        openai_client = openai_lib.OpenAI(api_key=plain_key, base_url=conn.base_url)
+        deployment = ""  # set from prompt.model at call site
+    else:
+        raise HTTPException(status_code=400, detail="MCP is only supported with OpenAI and Azure OpenAI connections")
+    return asyncio.run(_mcp_complete_async(openai_client, deployment, user_message, max_tokens, mcp_url))
+
+
+# ---------------------------------------------------------------------------
 # Prompt string resolution
 # ---------------------------------------------------------------------------
 
@@ -364,13 +452,24 @@ def run_single(
 
     connection_id = body.connection_id or prompt.connection_id
     use_responses_api = body.use_responses_api if body.use_responses_api is not None else prompt.use_responses_api
-    client = _resolve_client(connection_id, db, use_responses_api=use_responses_api)
-    model = _resolve_model(connection_id, db, model_override=prompt.model)
     max_tokens = body.max_output_tokens or prompt.max_output_tokens
     user_message = _resolve_template(_get_prompt_string(prompt), body.input, body.variables)
 
     try:
-        output, raw_output = client.complete_raw(model=model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
+        if body.mcp_server_url:
+            if not connection_id:
+                raise HTTPException(status_code=400, detail="A connection must be selected to run.")
+            conn = db.get(ConnectionORM, connection_id)
+            if not conn:
+                raise HTTPException(status_code=404, detail="Connection not found")
+            output, tool_calls = _run_with_mcp(conn, user_message, max_tokens, body.mcp_server_url)
+            raw_output = {"tool_calls": tool_calls}
+        else:
+            client = _resolve_client(connection_id, db, use_responses_api=use_responses_api)
+            model = _resolve_model(connection_id, db, model_override=prompt.model)
+            output, raw_output = client.complete_raw(model=model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -424,17 +523,19 @@ def run_row(
     output = ""
     score = ""
     error = None
+    tool_calls: list[dict] = []
     try:
         variables, raw_input = _parse_variables(body.input)
         max_tokens = body.max_output_tokens or prompt.max_output_tokens
-
         user_message = _resolve_template(_get_prompt_string(prompt, body.prompt_version_id), raw_input, variables)
-        output = prompt_client.complete(
-            model=prompt_model,
-            user_message=user_message,
-            max_tokens=max_tokens,
-            tools=prompt.tools,
-        )
+
+        if body.mcp_server_url:
+            prompt_conn = db.get(ConnectionORM, prompt_connection_id)
+            if not prompt_conn:
+                raise HTTPException(status_code=404, detail="Prompt connection not found")
+            output, tool_calls = _run_with_mcp(prompt_conn, user_message, max_tokens, body.mcp_server_url)
+        else:
+            output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
 
         scorer_message = _resolve_template(scorer.prompt_string, raw_input, variables, output=output)
         score = scorer_client.complete(model=scorer_model, user_message=scorer_message)
@@ -450,6 +551,7 @@ def run_row(
         output=output,
         score=score,
         error=error,
+        tool_calls=tool_calls,
     )
 
 
@@ -483,29 +585,27 @@ def run_playground(
 
     results: list[RowEvalResult] = []
 
+    prompt_conn = db.get(ConnectionORM, prompt_connection_id) if body.mcp_server_url else None
+
     for row in dataset.rows:
         output = ""
         score = ""
         error = None
+        tool_calls: list[dict] = []
         try:
             variables, raw_input = _parse_variables(row.input)
             max_tokens = body.max_output_tokens or prompt.max_output_tokens
-
             user_message = _resolve_template(_get_prompt_string(prompt, body.prompt_version_id), raw_input, variables)
-            output = prompt_client.complete(
-                model=prompt_model,
-                user_message=user_message,
-                max_tokens=max_tokens,
-                tools=prompt.tools,
-            )
+
+            if body.mcp_server_url:
+                if not prompt_conn:
+                    raise HTTPException(status_code=404, detail="Prompt connection not found")
+                output, tool_calls = _run_with_mcp(prompt_conn, user_message, max_tokens, body.mcp_server_url)
+            else:
+                output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
 
             scorer_message = _resolve_template(scorer.prompt_string, raw_input, variables, output=output)
-            score = scorer_client.complete(
-                model=scorer_model,
-                user_message=scorer_message,
-                max_tokens=1024,
-                tools=[],
-            )
+            score = scorer_client.complete(model=scorer_model, user_message=scorer_message, max_tokens=1024, tools=[])
         except HTTPException:
             raise
         except Exception as exc:
@@ -518,6 +618,7 @@ def run_playground(
             output=output,
             score=score,
             error=error,
+            tool_calls=tool_calls,
         ))
 
     return PlaygroundRunResult(
