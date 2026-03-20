@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -45,14 +46,25 @@ def get_current_user(
 
     if not membership:
         # First login — auto-create a personal workspace on the Free plan
-        name = email.split("@")[0] if email else "My Workspace"
-        org = OrganizationORM(name=f"{name}'s workspace", plan="free")
-        db.add(org)
-        db.flush()
-        membership = MembershipORM(org_id=org.id, user_id=user_id, email=email, role="admin")
-        db.add(membership)
-        db.commit()
-        db.refresh(membership)
+        try:
+            name = email.split("@")[0] if email else "My Workspace"
+            org = OrganizationORM(name=f"{name}'s workspace", plan="free")
+            db.add(org)
+            db.flush()
+            membership = MembershipORM(org_id=org.id, user_id=user_id, email=email, role="admin")
+            db.add(membership)
+            db.commit()
+            db.refresh(membership)
+        except IntegrityError:
+            # Concurrent request already created the membership — roll back and fetch it
+            db.rollback()
+            membership = (
+                db.query(MembershipORM)
+                .filter(MembershipORM.user_id == user_id)
+                .first()
+            )
+            if not membership:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to initialize workspace")
     elif membership.email != email:
         membership.email = email
         db.commit()

@@ -39,7 +39,10 @@ class OrganizationORM(Base):
 
 class MembershipORM(Base):
     __tablename__ = "memberships"
-    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_membership_org_user"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "user_id", name="uq_membership_org_user"),
+        UniqueConstraint("user_id", name="uq_membership_user"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
