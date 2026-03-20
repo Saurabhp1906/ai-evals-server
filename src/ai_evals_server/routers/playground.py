@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..auth.dependencies import CurrentUser, get_current_user
 from ..auth.utils import decrypt_api_key
 from ..database import get_db
-from ..models.orm import ConnectionORM, DatasetORM, PromptORM, ScorerORM
+from ..models.orm import ConnectionORM, DatasetORM, PromptORM, PromptVersionORM, ScorerORM
 from ..models.schemas import ConnectionType, PlaygroundRunRequest, PlaygroundRunResult, RowEvalResult, RowRunRequest, ScorerRunRequest, ScorerRunResult, SingleRunRequest, SingleRunResult
 
 router = APIRouter(prefix="/playground", tags=["playground"])
@@ -300,6 +300,23 @@ def _resolve_model(connection_id: str | None, db: Session, model_override: str |
 
 
 # ---------------------------------------------------------------------------
+# Prompt string resolution
+# ---------------------------------------------------------------------------
+
+def _get_prompt_string(prompt: PromptORM, version_id: str | None = None) -> str:
+    """Return the prompt string from a specific version (or latest if not specified)."""
+    if not prompt.versions:
+        raise HTTPException(status_code=400, detail=f"Prompt '{prompt.id}' has no versions")
+    if version_id:
+        v = next((v for v in prompt.versions if v.id == version_id), None)
+        if not v:
+            raise HTTPException(status_code=404, detail=f"Version '{version_id}' not found on prompt '{prompt.id}'")
+        return v.prompt_string
+    latest = max(prompt.versions, key=lambda v: v.version_number)
+    return latest.prompt_string
+
+
+# ---------------------------------------------------------------------------
 # Template resolution
 # ---------------------------------------------------------------------------
 
@@ -350,7 +367,7 @@ def run_single(
     client = _resolve_client(connection_id, db, use_responses_api=use_responses_api)
     model = _resolve_model(connection_id, db, model_override=prompt.model)
     max_tokens = body.max_output_tokens or prompt.max_output_tokens
-    user_message = _resolve_template(prompt.prompt_string, body.input, body.variables)
+    user_message = _resolve_template(_get_prompt_string(prompt), body.input, body.variables)
 
     try:
         output, raw_output = client.complete_raw(model=model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
@@ -411,7 +428,7 @@ def run_row(
         variables, raw_input = _parse_variables(body.input)
         max_tokens = body.max_output_tokens or prompt.max_output_tokens
 
-        user_message = _resolve_template(prompt.prompt_string, raw_input, variables)
+        user_message = _resolve_template(_get_prompt_string(prompt, body.prompt_version_id), raw_input, variables)
         output = prompt_client.complete(
             model=prompt_model,
             user_message=user_message,
@@ -474,7 +491,7 @@ def run_playground(
             variables, raw_input = _parse_variables(row.input)
             max_tokens = body.max_output_tokens or prompt.max_output_tokens
 
-            user_message = _resolve_template(prompt.prompt_string, raw_input, variables)
+            user_message = _resolve_template(_get_prompt_string(prompt, body.prompt_version_id), raw_input, variables)
             output = prompt_client.complete(
                 model=prompt_model,
                 user_message=user_message,

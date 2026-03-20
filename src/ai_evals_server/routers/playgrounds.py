@@ -23,7 +23,7 @@ def create_playground(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlaygroundSchema:
     enforce_limit(db, current_user.org_id, current_user.org_plan, "playgrounds", PlaygroundORM)
-    pg = PlaygroundORM(**body.model_dump(), org_id=current_user.org_id)
+    pg = PlaygroundORM(**body.model_dump(), org_id=current_user.org_id, created_by_email=current_user.email)
     db.add(pg)
     db.commit()
     db.refresh(pg)

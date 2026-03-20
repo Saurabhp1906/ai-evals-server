@@ -10,17 +10,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class PromptCreate(BaseModel):
     name: str
-    prompt_string: str  # use {input} or ${varName} as placeholders
-    tools: list[str] = Field(default_factory=list)  # e.g. ["web_search"]
+    prompt_string: str = ''  # used only to seed v1, not stored on the prompt record
+    tools: list[str] = Field(default_factory=list)
     use_responses_api: bool = False
     connection_id: str | None = None
     max_output_tokens: int | None = None
-    model: str | None = None  # optional model override (used for OpenAI connections)
+    model: str | None = None
 
 
 class PromptUpdate(BaseModel):
     name: str | None = None
-    prompt_string: str | None = None
     tools: list[str] | None = None
     use_responses_api: bool | None = None
     connection_id: str | None = None
@@ -28,16 +27,28 @@ class PromptUpdate(BaseModel):
     model: str | None = None
 
 
-class Prompt(PromptCreate):
+class Prompt(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    name: str
+    tools: list[str]
+    use_responses_api: bool
+    connection_id: str | None = None
+    max_output_tokens: int | None = None
+    model: str | None = None
     created_at: datetime
+    created_by_email: str | None = None
+    latest_version_string: str | None = None  # derived from latest version
 
 
 class PromptVersionCreate(BaseModel):
     prompt_string: str
     version_number: int
+
+
+class PromptVersionUpdate(BaseModel):
+    prompt_string: str
 
 
 class PromptVersion(PromptVersionCreate):
@@ -83,6 +94,7 @@ class Dataset(DatasetCreate):
     id: str
     rows: list[DatasetRow] = Field(default_factory=list)
     created_at: datetime
+    created_by_email: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +123,7 @@ class Scorer(ScorerCreate):
 
     id: str
     created_at: datetime
+    created_by_email: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +208,7 @@ class RowRunRequest(BaseModel):
     comment: str = ""
     prompt_id: str
     scorer_id: str
+    prompt_version_id: str | None = None
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     max_output_tokens: int | None = None
@@ -204,6 +218,7 @@ class PlaygroundRunRequest(BaseModel):
     prompt_id: str
     dataset_id: str
     scorer_id: str
+    prompt_version_id: str | None = None
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     max_output_tokens: int | None = None
@@ -283,6 +298,7 @@ class PlaygroundSchema(BaseModel):
     prompt_connection_id: str | None
     scorer_connection_id: str | None
     created_at: datetime
+    created_by_email: str | None = None
     runs: list[PlaygroundRunSchema] = Field(default_factory=list)
 
 

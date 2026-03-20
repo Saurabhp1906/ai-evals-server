@@ -5,9 +5,28 @@ from ..auth.dependencies import CurrentUser, get_current_user
 from ..auth.limits import enforce_limit
 from ..database import get_db
 from ..models.orm import PromptORM, PromptVersionORM
-from ..models.schemas import Prompt, PromptCreate, PromptUpdate, PromptVersion, PromptVersionCreate
+from ..models.schemas import Prompt, PromptCreate, PromptUpdate, PromptVersion, PromptVersionCreate, PromptVersionUpdate
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
+
+
+def _to_prompt_response(prompt: PromptORM) -> Prompt:
+    latest_version_string = None
+    if prompt.versions:
+        latest = max(prompt.versions, key=lambda v: v.version_number)
+        latest_version_string = latest.prompt_string
+    return Prompt(
+        id=prompt.id,
+        name=prompt.name,
+        tools=prompt.tools,
+        use_responses_api=prompt.use_responses_api,
+        connection_id=prompt.connection_id,
+        max_output_tokens=prompt.max_output_tokens,
+        model=prompt.model,
+        created_at=prompt.created_at,
+        created_by_email=prompt.created_by_email,
+        latest_version_string=latest_version_string,
+    )
 
 
 @router.post("", response_model=Prompt, status_code=201)
@@ -17,11 +36,15 @@ def create_prompt(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Prompt:
     enforce_limit(db, current_user.org_id, current_user.org_plan, "prompts", PromptORM)
-    prompt = PromptORM(**body.model_dump(), org_id=current_user.org_id)
+    prompt_data = body.model_dump(exclude={'prompt_string'})
+    prompt = PromptORM(**prompt_data, org_id=current_user.org_id, created_by_email=current_user.email)
     db.add(prompt)
+    db.flush()
+    v1 = PromptVersionORM(prompt_id=prompt.id, version_number=1, prompt_string=body.prompt_string)
+    db.add(v1)
     db.commit()
     db.refresh(prompt)
-    return Prompt.model_validate(prompt)
+    return _to_prompt_response(prompt)
 
 
 @router.get("", response_model=list[Prompt])
@@ -30,7 +53,7 @@ def list_prompts(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[Prompt]:
     rows = db.query(PromptORM).filter(PromptORM.org_id == current_user.org_id).all()
-    return [Prompt.model_validate(p) for p in rows]
+    return [_to_prompt_response(p) for p in rows]
 
 
 @router.get("/{prompt_id}", response_model=Prompt)
@@ -42,7 +65,7 @@ def get_prompt(
     prompt = db.get(PromptORM, prompt_id)
     if not prompt or prompt.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="Prompt not found")
-    return Prompt.model_validate(prompt)
+    return _to_prompt_response(prompt)
 
 
 @router.put("/{prompt_id}", response_model=Prompt)
@@ -59,7 +82,7 @@ def update_prompt(
         setattr(prompt, field, value)
     db.commit()
     db.refresh(prompt)
-    return Prompt.model_validate(prompt)
+    return _to_prompt_response(prompt)
 
 
 @router.delete("/{prompt_id}", status_code=204)
@@ -109,6 +132,42 @@ def create_version(
         raise HTTPException(status_code=404, detail="Prompt not found")
     version = PromptVersionORM(prompt_id=prompt_id, **body.model_dump())
     db.add(version)
+    db.commit()
+    db.refresh(version)
+    return PromptVersion.model_validate(version)
+
+
+@router.get("/{prompt_id}/versions/{version_id}", response_model=PromptVersion)
+def get_version(
+    prompt_id: str,
+    version_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> PromptVersion:
+    prompt = db.get(PromptORM, prompt_id)
+    if not prompt or prompt.org_id != current_user.org_id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    version = db.get(PromptVersionORM, version_id)
+    if not version or version.prompt_id != prompt_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return PromptVersion.model_validate(version)
+
+
+@router.put("/{prompt_id}/versions/{version_id}", response_model=PromptVersion)
+def update_version(
+    prompt_id: str,
+    version_id: str,
+    body: PromptVersionUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> PromptVersion:
+    prompt = db.get(PromptORM, prompt_id)
+    if not prompt or prompt.org_id != current_user.org_id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    version = db.get(PromptVersionORM, version_id)
+    if not version or version.prompt_id != prompt_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    version.prompt_string = body.prompt_string
     db.commit()
     db.refresh(version)
     return PromptVersion.model_validate(version)

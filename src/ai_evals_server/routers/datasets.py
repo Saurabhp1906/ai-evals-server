@@ -17,7 +17,7 @@ def create_dataset(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Dataset:
     enforce_limit(db, current_user.org_id, current_user.org_plan, "datasets", DatasetORM)
-    dataset = DatasetORM(**body.model_dump(), org_id=current_user.org_id)
+    dataset = DatasetORM(**body.model_dump(), org_id=current_user.org_id, created_by_email=current_user.email)
     db.add(dataset)
     db.commit()
     db.refresh(dataset)

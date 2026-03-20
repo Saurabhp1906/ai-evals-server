@@ -95,7 +95,6 @@ class PromptORM(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    prompt_string: Mapped[str] = mapped_column(Text, nullable=False)
     tools: Mapped[list] = mapped_column(JSON, default=list)
     use_responses_api: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     connection_id: Mapped[str | None] = mapped_column(
@@ -104,6 +103,8 @@ class PromptORM(Base):
     max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     model: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
     versions: Mapped[list["PromptVersionORM"]] = relationship(
@@ -121,6 +122,7 @@ class DatasetORM(Base):
     org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
     rows: Mapped[list["DatasetRowORM"]] = relationship(
         "DatasetRowORM",
@@ -157,6 +159,7 @@ class ScorerORM(Base):
     )
     pass_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
 
@@ -179,6 +182,7 @@ class PlaygroundORM(Base):
     prompt_connection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     scorer_connection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
     runs: Mapped[list["PlaygroundRunORM"]] = relationship(
         "PlaygroundRunORM",

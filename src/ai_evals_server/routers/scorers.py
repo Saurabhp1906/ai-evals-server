@@ -17,7 +17,7 @@ def create_scorer(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Scorer:
     enforce_limit(db, current_user.org_id, current_user.org_plan, "scorers", ScorerORM)
-    scorer = ScorerORM(**body.model_dump(), org_id=current_user.org_id)
+    scorer = ScorerORM(**body.model_dump(), org_id=current_user.org_id, created_by_email=current_user.email)
     db.add(scorer)
     db.commit()
     db.refresh(scorer)
