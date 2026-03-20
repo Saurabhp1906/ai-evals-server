@@ -123,6 +123,8 @@ def accept_invite(
         raise HTTPException(status_code=404, detail="Invite not found or already used")
     if invite.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="Invite has expired")
+    if invite.email.lower() != current_user.email.lower():
+        raise HTTPException(status_code=403, detail="This invite was sent to a different email address")
 
     # Check not already a member of this org
     already = (
