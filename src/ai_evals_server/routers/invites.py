@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user, require_admin
 from ..database import get_db
+from ..email import send_invite_email
 from ..models.orm import InviteORM, MembershipORM, OrganizationORM
 
 router = APIRouter(prefix="/invites", tags=["invites"])
@@ -66,6 +67,10 @@ def create_invite(
     db.add(invite)
     db.commit()
     db.refresh(invite)
+
+    org = db.get(OrganizationORM, current_user.org_id)
+    send_invite_email(invite.email, org.name if org else "your team", invite.token)
+
     return _to_response(invite)
 
 
