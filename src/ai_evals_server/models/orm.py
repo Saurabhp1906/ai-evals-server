@@ -179,6 +179,11 @@ class McpServerORM(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     token: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted Bearer token
+    oauth_client_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    oauth_client_secret: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted
+    oauth_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)   # encrypted
+    oauth_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted
+    oauth_token_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

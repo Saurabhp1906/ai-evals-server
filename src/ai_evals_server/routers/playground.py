@@ -303,6 +303,89 @@ def _resolve_model(connection_id: str | None, db: Session, model_override: str |
 
 
 # ---------------------------------------------------------------------------
+# Scorer tool definitions (forced tool call → structured score + reasoning)
+# ---------------------------------------------------------------------------
+
+_SUBMIT_SCORE_TOOL_CLAUDE = {
+    "name": "submit_score",
+    "description": "Submit the evaluation score and reasoning for the given output",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "score": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Integer score from 0 to 10"},
+            "reasoning": {"type": "string", "description": "Explanation for the score"},
+        },
+        "required": ["score", "reasoning"],
+    },
+}
+
+_SUBMIT_SCORE_TOOL_OPENAI = {
+    "type": "function",
+    "function": {
+        "name": "submit_score",
+        "description": "Submit the evaluation score and reasoning for the given output",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "score": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Integer score from 0 to 10"},
+                "reasoning": {"type": "string", "description": "Explanation for the score"},
+            },
+            "required": ["score", "reasoning"],
+        },
+    },
+}
+
+
+def _run_scorer(conn: ConnectionORM, model: str, scorer_message: str) -> str:
+    """Run scorer via forced tool call. Returns JSON: {"score": int, "reasoning": str}."""
+    plain_key = decrypt_api_key(conn.api_key)
+
+    if conn.type == ConnectionType.claude:
+        client = anthropic.Anthropic(api_key=plain_key)
+        response = client.messages.create(
+            model=model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": scorer_message}],
+            tools=[_SUBMIT_SCORE_TOOL_CLAUDE],
+            tool_choice={"type": "tool", "name": "submit_score"},
+        )
+        for block in response.content:
+            if hasattr(block, "type") and block.type == "tool_use" and block.name == "submit_score":
+                args = block.input
+                return json.dumps({"score": int(args["score"]), "reasoning": str(args.get("reasoning", ""))})
+        raise ValueError("submit_score tool was not called")
+
+    if conn.type == ConnectionType.openai:
+        openai_client: openai_lib.OpenAI | openai_lib.AzureOpenAI = openai_lib.OpenAI(api_key=plain_key, base_url=conn.base_url)
+        deployment = model
+    else:
+        openai_client = openai_lib.AzureOpenAI(
+            api_key=plain_key,
+            azure_endpoint=conn.azure_endpoint or "",
+            api_version=conn.azure_api_version,
+        )
+        deployment = conn.azure_deployment or model
+
+    kwargs: dict = {
+        "model": deployment,
+        "messages": [{"role": "user", "content": scorer_message}],
+        "tools": [_SUBMIT_SCORE_TOOL_OPENAI],
+        "tool_choice": {"type": "function", "function": {"name": "submit_score"}},
+    }
+    try:
+        response = openai_client.chat.completions.create(**kwargs)
+    except openai_lib.BadRequestError as e:
+        if "max_completion_tokens" in str(e):
+            kwargs["max_completion_tokens"] = 512
+            response = openai_client.chat.completions.create(**kwargs)
+        else:
+            raise
+    tc = response.choices[0].message.tool_calls[0]
+    args = json.loads(tc.function.arguments)
+    return json.dumps({"score": int(args["score"]), "reasoning": str(args.get("reasoning", ""))})
+
+
+# ---------------------------------------------------------------------------
 # MCP tool call runner
 # ---------------------------------------------------------------------------
 
@@ -557,12 +640,16 @@ def run_scorer(
         raise HTTPException(status_code=404, detail="Scorer not found")
 
     connection_id = body.connection_id or scorer.connection_id
-    client = _resolve_client(connection_id, db)
+    if not connection_id:
+        raise HTTPException(status_code=400, detail="A connection must be selected to run.")
+    conn = db.get(ConnectionORM, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
     model = _resolve_model(connection_id, db)
     scorer_message = _resolve_template(scorer.prompt_string, body.input, body.variables, output=body.output)
 
     try:
-        score = client.complete(model=model, user_message=scorer_message)
+        score = _run_scorer(conn, model, scorer_message)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -586,9 +673,11 @@ def run_row(
     prompt_connection_id = body.prompt_connection_id or prompt.connection_id
     scorer_connection_id = body.scorer_connection_id or scorer.connection_id or prompt_connection_id
     prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
-    scorer_client = _resolve_client(scorer_connection_id, db)
     prompt_model = _resolve_model(prompt_connection_id, db, model_override=prompt.model)
     scorer_model = _resolve_model(scorer_connection_id, db)
+    scorer_conn = db.get(ConnectionORM, scorer_connection_id)
+    if not scorer_conn:
+        raise HTTPException(status_code=404, detail="Scorer connection not found")
 
     mcp_url, mcp_headers = _resolve_mcp(body.mcp_server_id, db)
     output = ""
@@ -609,7 +698,7 @@ def run_row(
             output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
 
         scorer_message = _resolve_template(scorer.prompt_string, raw_input, variables, output=output)
-        score = scorer_client.complete(model=scorer_model, user_message=scorer_message)
+        score = _run_scorer(scorer_conn, scorer_model, scorer_message)
     except HTTPException:
         raise
     except Exception as exc:
@@ -650,9 +739,11 @@ def run_playground(
     prompt_connection_id = body.prompt_connection_id or prompt.connection_id
     scorer_connection_id = body.scorer_connection_id or scorer.connection_id or prompt_connection_id
     prompt_client = _resolve_client(prompt_connection_id, db, use_responses_api=prompt.use_responses_api)
-    scorer_client = _resolve_client(scorer_connection_id, db)
     prompt_model = _resolve_model(prompt_connection_id, db, model_override=prompt.model)
     scorer_model = _resolve_model(scorer_connection_id, db)
+    scorer_conn = db.get(ConnectionORM, scorer_connection_id)
+    if not scorer_conn:
+        raise HTTPException(status_code=404, detail="Scorer connection not found")
 
     results: list[RowEvalResult] = []
 
@@ -677,7 +768,7 @@ def run_playground(
                 output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
 
             scorer_message = _resolve_template(scorer.prompt_string, raw_input, variables, output=output)
-            score = scorer_client.complete(model=scorer_model, user_message=scorer_message, max_tokens=1024, tools=[])
+            score = _run_scorer(scorer_conn, scorer_model, scorer_message)
         except HTTPException:
             raise
         except Exception as exc:

@@ -191,13 +191,19 @@ class McpToolSchema(BaseModel):
 class McpServerCreate(BaseModel):
     name: str
     url: str
-    token: str | None = None  # plain token; encrypted before storing
+    token: str | None = None           # plain Bearer token; encrypted before storing
+    oauth_client_id: str | None = None
+    oauth_client_secret: str | None = None  # plain; encrypted before storing
+    skip_verify: bool = False          # skip connection verification (used for OAuth flow)
 
 
 class McpServerUpdate(BaseModel):
     name: str | None = None
     url: str | None = None
-    token: str | None = None  # plain token; encrypted before storing
+    token: str | None = None
+    oauth_client_id: str | None = None
+    oauth_client_secret: str | None = None
+    skip_verify: bool = False
 
 
 class McpServerSchema(BaseModel):
@@ -206,8 +212,27 @@ class McpServerSchema(BaseModel):
     id: str
     name: str
     url: str
-    has_token: bool = False  # never expose the token; just indicate if one is set
+    has_token: bool = False
+    has_oauth: bool = False         # True if OAuth client credentials configured
+    oauth_connected: bool = False   # True if access token stored
+    oauth_client_id: str | None = None  # exposed for editing (not sensitive)
     created_at: datetime
+
+
+class OAuthStartRequest(BaseModel):
+    redirect_uri: str
+    scope: str | None = None
+
+
+class OAuthStartResponse(BaseModel):
+    authorization_url: str
+    state: str
+
+
+class OAuthCallbackRequest(BaseModel):
+    code: str
+    state: str
+    redirect_uri: str
 
 
 class SingleRunRequest(BaseModel):
