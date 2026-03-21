@@ -23,6 +23,8 @@ def _to_prompt_response(prompt: PromptORM) -> Prompt:
         connection_id=prompt.connection_id,
         max_output_tokens=prompt.max_output_tokens,
         model=prompt.model,
+        mcp_server_id=prompt.mcp_server_id,
+        mcp_tool_filter=prompt.mcp_tool_filter,
         created_at=prompt.created_at,
         created_by_email=prompt.created_by_email,
         latest_version_string=latest_version_string,

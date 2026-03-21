@@ -29,16 +29,26 @@ def _verify_connection(body: ConnectionCreate) -> None:
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=1,
             )
-        elif body.type == ConnectionType.openai_responses:
-            client = openai_lib.OpenAI(api_key=body.api_key, base_url=body.base_url)
-            client.responses.create(model="gpt-4o-mini", input="hi", max_output_tokens=1)
         elif body.type == ConnectionType.azure_openai:
             client = openai_lib.AzureOpenAI(
                 api_key=body.api_key,
                 azure_endpoint=body.azure_endpoint or "",
                 api_version=body.azure_api_version,
             )
-            client.responses.create(model=body.azure_deployment or "", input="hi", max_output_tokens=2000)
+            kwargs: dict = {
+                "model": body.azure_deployment or "",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 100,
+            }
+            try:
+                client.chat.completions.create(**kwargs)
+            except openai_lib.BadRequestError as e:
+                if "max_completion_tokens" in str(e):
+                    kwargs.pop("max_tokens")
+                    kwargs["max_completion_tokens"] = 100
+                    client.chat.completions.create(**kwargs)
+                else:
+                    raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Connection verification failed: {exc}")
 

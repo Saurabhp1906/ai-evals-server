@@ -16,6 +16,8 @@ class PromptCreate(BaseModel):
     connection_id: str | None = None
     max_output_tokens: int | None = None
     model: str | None = None
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None  # null = all tools allowed
 
 
 class PromptUpdate(BaseModel):
@@ -25,6 +27,8 @@ class PromptUpdate(BaseModel):
     connection_id: str | None = None
     max_output_tokens: int | None = None
     model: str | None = None
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
 
 
 class Prompt(BaseModel):
@@ -37,6 +41,8 @@ class Prompt(BaseModel):
     connection_id: str | None = None
     max_output_tokens: int | None = None
     model: str | None = None
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
     created_at: datetime
     created_by_email: str | None = None
     latest_version_string: str | None = None  # derived from latest version
@@ -176,14 +182,22 @@ class ConnectionResponse(BaseModel):
 # Playground
 # ---------------------------------------------------------------------------
 
+class McpToolSchema(BaseModel):
+    name: str
+    description: str
+    parameters: dict
+
+
 class McpServerCreate(BaseModel):
     name: str
     url: str
+    token: str | None = None  # plain token; encrypted before storing
 
 
 class McpServerUpdate(BaseModel):
     name: str | None = None
     url: str | None = None
+    token: str | None = None  # plain token; encrypted before storing
 
 
 class McpServerSchema(BaseModel):
@@ -192,6 +206,7 @@ class McpServerSchema(BaseModel):
     id: str
     name: str
     url: str
+    has_token: bool = False  # never expose the token; just indicate if one is set
     created_at: datetime
 
 
@@ -201,13 +216,15 @@ class SingleRunRequest(BaseModel):
     variables: dict[str, str] = Field(default_factory=dict)
     connection_id: str | None = None
     max_output_tokens: int | None = None
-    use_responses_api: bool | None = None  # if None, falls back to prompt.use_responses_api
-    mcp_server_url: str | None = None  # resolved URL passed directly from frontend
+    use_responses_api: bool | None = None
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None  # null = all tools
 
 
 class SingleRunResult(BaseModel):
     output: str
     raw_output: Any = None
+    tool_calls: list[dict] = Field(default_factory=list)
 
 
 class ScorerRunRequest(BaseModel):
@@ -232,7 +249,8 @@ class RowRunRequest(BaseModel):
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     max_output_tokens: int | None = None
-    mcp_server_url: str | None = None  # resolved URL passed directly from frontend
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
 
 
 class PlaygroundRunRequest(BaseModel):
@@ -243,7 +261,8 @@ class PlaygroundRunRequest(BaseModel):
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     max_output_tokens: int | None = None
-    mcp_server_url: str | None = None  # resolved URL passed directly from frontend
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
 
 
 class RowEvalResult(BaseModel):
@@ -276,6 +295,7 @@ class PlaygroundCreate(BaseModel):
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
 
 
 class PlaygroundUpdate(BaseModel):
@@ -286,6 +306,7 @@ class PlaygroundUpdate(BaseModel):
     prompt_connection_id: str | None = None
     scorer_connection_id: str | None = None
     mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
 
 
 class PlaygroundRunRowSchema(BaseModel):
@@ -327,6 +348,7 @@ class PlaygroundSchema(BaseModel):
     prompt_connection_id: str | None
     scorer_connection_id: str | None
     mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
     created_at: datetime
     created_by_email: str | None = None
     runs: list[PlaygroundRunSchema] = Field(default_factory=list)

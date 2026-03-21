@@ -109,6 +109,10 @@ class PromptORM(Base):
 
     created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    mcp_server_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("mcp_servers.id", ondelete="SET NULL"), nullable=True
+    )
+    mcp_tool_filter: Mapped[list | None] = mapped_column(JSON, nullable=True)  # null = all tools
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
     versions: Mapped[list["PromptVersionORM"]] = relationship(
         "PromptVersionORM",
@@ -174,6 +178,7 @@ class McpServerORM(Base):
     org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
+    token: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted Bearer token
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -197,6 +202,7 @@ class PlaygroundORM(Base):
     mcp_server_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("mcp_servers.id", ondelete="SET NULL"), nullable=True
     )
+    mcp_tool_filter: Mapped[list | None] = mapped_column(JSON, nullable=True)  # null = all tools
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
