@@ -260,6 +260,43 @@ class PlaygroundRunRowORM(Base):
     run: Mapped["PlaygroundRunORM"] = relationship("PlaygroundRunORM", back_populates="rows")
 
 
+class ReviewORM(Base):
+    __tablename__ = "reviews"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    playground_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    playground_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    run_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    rows: Mapped[list["ReviewRowORM"]] = relationship(
+        "ReviewRowORM",
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewRowORM.created_at",
+    )
+
+
+class ReviewRowORM(Base):
+    __tablename__ = "review_rows"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    review_id: Mapped[str] = mapped_column(String, ForeignKey("reviews.id", ondelete="CASCADE"), nullable=False, index=True)
+    input: Mapped[str] = mapped_column(Text, nullable=False)
+    output: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    score: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    row_comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    prompt_string: Mapped[str | None] = mapped_column(Text, nullable=True)
+    annotation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[str | None] = mapped_column(String, nullable=True)  # good | bad | neutral
+    expected_behavior: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    review: Mapped["ReviewORM"] = relationship("ReviewORM", back_populates="rows")
+
+
 class PromptVersionORM(Base):
     __tablename__ = "prompt_versions"
 

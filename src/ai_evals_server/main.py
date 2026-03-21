@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import prompts, datasets, scorers, playground, playgrounds, connections, organizations, invites, mcp_servers
+from fastapi.responses import HTMLResponse
+from .routers import prompts, datasets, scorers, playground, playgrounds, connections, organizations, invites, mcp_servers, reviews
+
+_STATIC = Path(__file__).parent / "static"
 
 _ALLOWED_ORIGINS = [
     o.strip()
@@ -32,12 +36,18 @@ app.include_router(scorers.router)
 app.include_router(playground.router)
 app.include_router(playgrounds.router)
 app.include_router(mcp_servers.router)
+app.include_router(reviews.router)
 
 
 
 @app.get("/", tags=["health"])
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/guide", response_class=HTMLResponse, include_in_schema=False)
+def guide() -> HTMLResponse:
+    return HTMLResponse((_STATIC / "guide.html").read_text())
 
 
 def main() -> None:

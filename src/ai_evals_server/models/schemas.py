@@ -249,7 +249,7 @@ class SingleRunRequest(BaseModel):
 class SingleRunResult(BaseModel):
     output: str
     raw_output: Any = None
-    tool_calls: list[dict] = Field(default_factory=list)
+    tool_calls: list[dict] | None = Field(default=None)
 
 
 class ScorerRunRequest(BaseModel):
@@ -298,7 +298,7 @@ class RowEvalResult(BaseModel):
     score: str            # Scorer LLM response
     error: str | None = None
     elapsed_ms: int | None = None
-    tool_calls: list[dict] = Field(default_factory=list)
+    tool_calls: list[dict] | None = Field(default=None)
 
 
 class PlaygroundRunResult(BaseModel):
@@ -345,7 +345,7 @@ class PlaygroundRunRowSchema(BaseModel):
     score: str
     error: str | None = None
     elapsed_ms: int | None = None
-    tool_calls: list[dict] = Field(default_factory=list)
+    tool_calls: list[dict] | None = Field(default=None)
 
 
 class PlaygroundRunSchema(BaseModel):
@@ -386,3 +386,57 @@ class SaveRunRequest(BaseModel):
     prompt_id: str | None = None
     dataset_id: str | None = None
     scorer_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Reviews
+# ---------------------------------------------------------------------------
+
+class ReviewRowSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    review_id: str
+    input: str
+    output: str
+    score: str
+    row_comment: str
+    prompt_string: str | None = None
+    annotation: str | None = None
+    rating: str | None = None  # good | bad | neutral
+    expected_behavior: str | None = None
+    created_at: datetime
+
+
+class ReviewSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    playground_id: str | None = None
+    playground_name: str | None = None
+    run_label: str | None = None
+    created_at: datetime
+    rows: list[ReviewRowSchema] = Field(default_factory=list)
+
+
+class ReviewCreateRow(BaseModel):
+    input: str
+    output: str
+    score: str = ""
+    row_comment: str = ""
+    prompt_string: str | None = None
+
+
+class ReviewCreate(BaseModel):
+    name: str
+    playground_id: str | None = None
+    playground_name: str | None = None
+    run_label: str | None = None
+    rows: list[ReviewCreateRow] = Field(default_factory=list)
+
+
+class ReviewRowUpdate(BaseModel):
+    annotation: str | None = None
+    rating: str | None = None
+    expected_behavior: str | None = None
