@@ -9,6 +9,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
+from ..auth.limits import check_daily_quota
 from ..auth.utils import decrypt_api_key
 from ..database import get_db
 from ..models.orm import ConnectionORM, DatasetORM, McpServerORM, PromptORM, PromptVersionORM, ScorerORM
@@ -598,6 +599,10 @@ def run_single(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> SingleRunResult:
+    check_daily_quota(
+        db, current_user.org_id, current_user.org_plan, "playground_runs",
+        increment=1, custom_limits=current_user.org_custom_limits,
+    )
     prompt = db.get(PromptORM, body.prompt_id)
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -635,6 +640,10 @@ def run_scorer(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ScorerRunResult:
+    check_daily_quota(
+        db, current_user.org_id, current_user.org_plan, "scorer_evaluations",
+        increment=1, custom_limits=current_user.org_custom_limits,
+    )
     scorer = db.get(ScorerORM, body.scorer_id)
     if not scorer:
         raise HTTPException(status_code=404, detail="Scorer not found")
@@ -735,6 +744,17 @@ def run_playground(
 
     if not dataset.rows:
         raise HTTPException(status_code=400, detail="Dataset has no rows")
+
+    # Check both quotas upfront for the full batch
+    row_count = len(dataset.rows)
+    check_daily_quota(
+        db, current_user.org_id, current_user.org_plan, "playground_runs",
+        increment=row_count, custom_limits=current_user.org_custom_limits,
+    )
+    check_daily_quota(
+        db, current_user.org_id, current_user.org_plan, "scorer_evaluations",
+        increment=row_count, custom_limits=current_user.org_custom_limits,
+    )
 
     prompt_connection_id = body.prompt_connection_id or prompt.connection_id
     scorer_connection_id = body.scorer_connection_id or scorer.connection_id or prompt_connection_id

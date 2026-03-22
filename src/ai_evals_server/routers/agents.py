@@ -8,6 +8,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
+from ..auth.limits import check_daily_quota, check_resource_limit
 from ..auth.utils import decrypt_api_key
 from ..database import get_db
 from ..models.orm import AgentChatORM, AgentChatSummaryORM, AgentMessageORM, AgentORM, ConnectionORM, McpServerORM
@@ -57,12 +58,13 @@ async def _run_chat_with_mcp_async(
     messages: list[AgentMessageORM],
     conn: ConnectionORM,
     mcp: McpServerORM,
-) -> str:
+) -> tuple[str, list[dict]]:
     plain_key = decrypt_api_key(conn.api_key)
     model = agent.model or _DEFAULT_MODELS.get(conn.type, "claude-sonnet-4-6")
     max_tokens = agent.max_output_tokens or 1024
     tool_filter: list[str] | None = agent.mcp_tool_filter
     llm_messages = _build_llm_messages(messages)
+    recorded_calls: list[dict] = []
 
     async with streamablehttp_client(mcp.url, headers=_mcp_headers(mcp)) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -83,13 +85,15 @@ async def _run_chat_with_mcp_async(
                     response = client.messages.create(**kwargs)
                     tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
                     if not tool_use_blocks:
-                        return "\n".join(b.text for b in response.content if hasattr(b, "text")).strip()
+                        text = "\n".join(b.text for b in response.content if hasattr(b, "text")).strip()
+                        return text, recorded_calls
                     llm_messages.append({"role": "assistant", "content": response.content})
                     tool_results = []
                     for block in tool_use_blocks:
                         result = await session.call_tool(block.name, block.input)
                         result_text = "\n".join(b.text for b in result.content if hasattr(b, "text"))
                         tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result_text})
+                        recorded_calls.append({"name": block.name, "input": block.input, "result": result_text})
                     llm_messages.append({"role": "user", "content": tool_results})
 
             # OpenAI / Azure
@@ -127,21 +131,22 @@ async def _run_chat_with_mcp_async(
                         raise
                 msg = resp.choices[0].message
                 if not msg.tool_calls:
-                    return (msg.content or "").strip()
+                    return (msg.content or "").strip(), recorded_calls
                 llm_messages.append(msg)
                 for tc in msg.tool_calls:
                     args = json.loads(tc.function.arguments)
                     result = await session.call_tool(tc.function.name, args)
                     result_text = "\n".join(b.text for b in result.content if hasattr(b, "text"))
                     llm_messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+                    recorded_calls.append({"name": tc.function.name, "input": args, "result": result_text})
 
 
 def _run_chat(
     agent: AgentORM,
     messages: list[AgentMessageORM],
     db: Session,
-) -> str:
-    """Run LLM with full chat history. Dispatches to MCP tool loop if configured."""
+) -> tuple[str, list[dict]]:
+    """Run LLM with full chat history. Returns (text, tool_calls)."""
     if not agent.connection_id:
         raise HTTPException(status_code=400, detail="Agent has no connection configured")
 
@@ -155,7 +160,7 @@ def _run_chat(
         if mcp:
             return asyncio.run(_run_chat_with_mcp_async(agent, messages, conn, mcp))
 
-    # Plain LLM path (no MCP)
+    # Plain LLM path (no MCP, no tool calls)
     plain_key = decrypt_api_key(conn.api_key)
     model = agent.model or _DEFAULT_MODELS.get(conn.type, "claude-sonnet-4-6")
     max_tokens = agent.max_output_tokens or 1024
@@ -168,7 +173,7 @@ def _run_chat(
         if system:
             kwargs["system"] = system
         response = client.messages.create(**kwargs)
-        return "\n".join(b.text for b in response.content if hasattr(b, "text")).strip()
+        return "\n".join(b.text for b in response.content if hasattr(b, "text")).strip(), []
 
     if system:
         llm_messages = [{"role": "system", "content": system}] + llm_messages
@@ -189,7 +194,7 @@ def _run_chat(
             response = oa_client.chat.completions.create(model=deployment, messages=llm_messages, max_completion_tokens=max_tokens)
         else:
             raise
-    return (response.choices[0].message.content or "").strip()
+    return (response.choices[0].message.content or "").strip(), []
 
 
 def _summarize(agent: AgentORM, messages: list[AgentMessageORM], db: Session) -> str:
@@ -209,6 +214,10 @@ def _summarize(agent: AgentORM, messages: list[AgentMessageORM], db: Session) ->
 
 @router.post("", response_model=AgentSchema, status_code=201)
 def create_agent(body: AgentCreate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)) -> AgentSchema:
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "agents",
+        AgentORM, current_user.org_custom_limits,
+    )
     agent = AgentORM(
         org_id=current_user.org_id,
         name=body.name,
@@ -263,9 +272,11 @@ def delete_agent(agent_id: str, db: Session = Depends(get_db), current_user: Cur
 @router.post("/{agent_id}/chats", response_model=AgentChatSchema, status_code=201)
 def create_chat(agent_id: str, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)) -> AgentChatSchema:
     _get_agent(agent_id, db, current_user)
-    chat_count = db.query(AgentChatORM).filter(AgentChatORM.agent_id == agent_id).count()
-    if chat_count >= 5:
-        raise HTTPException(status_code=400, detail="Maximum of 5 chats per agent reached. Delete an existing chat to create a new one.")
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "chats_per_agent",
+        AgentChatORM, current_user.org_custom_limits,
+        filter_col="agent_id", filter_val=agent_id,
+    )
     chat = AgentChatORM(agent_id=agent_id)
     db.add(chat)
     db.commit()
@@ -320,8 +331,15 @@ def send_message(
         .all()
     )
 
-    if len(all_messages) >= 100:
-        raise HTTPException(status_code=400, detail="Chat has reached the maximum of 100 messages. Start a new chat to continue.")
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "messages_per_chat",
+        AgentMessageORM, current_user.org_custom_limits,
+        filter_col="chat_id", filter_val=chat_id,
+    )
+    check_daily_quota(
+        db, current_user.org_id, current_user.org_plan, "agent_messages",
+        increment=1, custom_limits=current_user.org_custom_limits,
+    )
 
     # Get the latest summary (if any)
     latest_summary = (
@@ -367,10 +385,10 @@ def send_message(
     context.append(user_msg)
 
     # Run LLM
-    assistant_text = _run_chat(agent, context, db)
+    assistant_text, tool_calls = _run_chat(agent, context, db)
 
     # Save assistant response
-    db.add(AgentMessageORM(chat_id=chat_id, role="assistant", content=assistant_text))
+    db.add(AgentMessageORM(chat_id=chat_id, role="assistant", content=assistant_text, tool_calls=tool_calls or None))
     db.commit()
     db.refresh(chat)
     return AgentChatSchema.model_validate(chat)

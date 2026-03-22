@@ -19,8 +19,9 @@ class CurrentUser:
     id: str
     email: str
     org_id: str
-    org_plan: str   # free | plus | pro
-    org_role: str   # admin | member
+    org_plan: str          # free | plus | pro | enterprise
+    org_role: str          # admin | member
+    org_custom_limits: dict | None = None  # enterprise per-org overrides
 
 
 def get_current_user(
@@ -79,6 +80,7 @@ def get_current_user(
         org_id=org.id,
         org_plan=org.plan,
         org_role=membership.role,
+        org_custom_limits=org.custom_limits,
     )
 
 

@@ -5,19 +5,23 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user, require_admin
-from ..auth.limits import PLAN_LIMITS, get_usage
+from ..auth.limits import get_full_usage
 from ..database import get_db
 from ..models.orm import (
-    ConnectionORM, MembershipORM, OrganizationORM,
-    PlaygroundORM, PromptORM, ScorerORM,
+    AgentORM, ConnectionORM, DatasetORM, McpServerORM, MembershipORM,
+    OrganizationORM, PlaygroundORM, PromptORM, ScorerORM,
 )
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
 _USAGE_MODELS = {
+    "connections": ConnectionORM,
     "prompts": PromptORM,
+    "datasets": DatasetORM,
     "scorers": ScorerORM,
     "playgrounds": PlaygroundORM,
+    "agents": AgentORM,
+    "mcp_servers": McpServerORM,
 }
 
 
@@ -40,9 +44,10 @@ class MemberResponse(BaseModel):
 
 
 class UsageResponse(BaseModel):
-    prompts: dict
-    scorers: dict
-    playgrounds: dict
+    plan: str
+    resources: dict
+    daily_quotas: dict
+    features: dict
 
 
 @router.get("/me", response_model=OrgResponse)
@@ -100,5 +105,8 @@ def get_usage_endpoint(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> UsageResponse:
-    usage = get_usage(db, current_user.org_id, current_user.org_plan, _USAGE_MODELS)
+    usage = get_full_usage(
+        db, current_user.org_id, current_user.org_plan,
+        _USAGE_MODELS, current_user.org_custom_limits,
+    )
     return UsageResponse(**usage)

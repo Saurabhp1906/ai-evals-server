@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
-from ..auth.limits import enforce_limit
+from ..auth.limits import check_resource_limit, require_feature
 from ..database import get_db
 from ..models.orm import PlaygroundORM, PlaygroundRunORM, PlaygroundRunRowORM
 from ..models.schemas import (
@@ -22,7 +22,10 @@ def create_playground(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlaygroundSchema:
-    enforce_limit(db, current_user.org_id, current_user.org_plan, "playgrounds", PlaygroundORM)
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "playgrounds",
+        PlaygroundORM, current_user.org_custom_limits,
+    )
     pg = PlaygroundORM(**body.model_dump(), org_id=current_user.org_id, created_by_email=current_user.email)
     db.add(pg)
     db.commit()
@@ -88,8 +91,7 @@ def save_run(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlaygroundRunSchema:
-    if current_user.org_plan == "free":
-        raise HTTPException(status_code=403, detail="Run history requires a Plus or Pro plan.")
+    require_feature(current_user.org_plan, "run_history", current_user.org_custom_limits)
     pg = db.get(PlaygroundORM, playground_id)
     if not pg or pg.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="Playground not found")

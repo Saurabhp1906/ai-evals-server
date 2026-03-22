@@ -5,6 +5,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user, require_admin
+from ..auth.limits import check_feature_flag, _get_limit, _NEXT_PLAN
 from ..database import get_db
 from ..email import send_invite_email
 from ..models.orm import InviteORM, MembershipORM, OrganizationORM
@@ -39,10 +40,35 @@ def create_invite(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_admin),
 ) -> InviteResponse:
-    if current_user.org_plan == "free":
-        raise HTTPException(status_code=403, detail="Inviting teammates requires a Plus or Pro plan.")
     if body.role not in ("admin", "member"):
         raise HTTPException(status_code=422, detail="role must be 'admin' or 'member'")
+
+    # Check team_members limit (active members + pending invites)
+    seat_limit = _get_limit(current_user.org_plan, "resources", "team_members", current_user.org_custom_limits)
+    if seat_limit is not None:
+        active_members = db.query(MembershipORM).filter(MembershipORM.org_id == current_user.org_id).count()
+        pending_invites = (
+            db.query(InviteORM)
+            .filter(InviteORM.org_id == current_user.org_id, InviteORM.accepted_at.is_(None))
+            .count()
+        )
+        if active_members + pending_invites >= seat_limit:
+            upgrade_to = _NEXT_PLAN.get(current_user.org_plan, "a higher")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "limit_exceeded",
+                    "resource": "team_members",
+                    "current": active_members + pending_invites,
+                    "limit": seat_limit,
+                    "plan": current_user.org_plan,
+                    "message": (
+                        f"{current_user.org_plan.capitalize()} plan allows {seat_limit} team members. "
+                        f"Upgrade to {upgrade_to} for more seats."
+                    ),
+                    "upgrade_url": "/settings/billing",
+                },
+            )
 
     # Invalidate any prior pending invite for the same email in this org
     existing = (

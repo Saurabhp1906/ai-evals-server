@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
-from ..auth.limits import enforce_limit
+from ..auth.limits import check_resource_limit
 from ..database import get_db
 from ..models.orm import PromptORM, PromptVersionORM
 from ..models.schemas import Prompt, PromptCreate, PromptUpdate, PromptVersion, PromptVersionCreate, PromptVersionUpdate
@@ -37,7 +37,10 @@ def create_prompt(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Prompt:
-    enforce_limit(db, current_user.org_id, current_user.org_plan, "prompts", PromptORM)
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "prompts",
+        PromptORM, current_user.org_custom_limits,
+    )
     prompt_data = body.model_dump(exclude={'prompt_string'})
     prompt = PromptORM(**prompt_data, org_id=current_user.org_id, created_by_email=current_user.email)
     db.add(prompt)
@@ -132,6 +135,11 @@ def create_version(
     prompt = db.get(PromptORM, prompt_id)
     if not prompt or prompt.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="Prompt not found")
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "prompt_versions",
+        PromptVersionORM, current_user.org_custom_limits,
+        filter_col="prompt_id", filter_val=prompt_id,
+    )
     version = PromptVersionORM(prompt_id=prompt_id, **body.model_dump())
     db.add(version)
     db.commit()

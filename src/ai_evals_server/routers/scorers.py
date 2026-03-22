@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
-from ..auth.limits import enforce_limit
+from ..auth.limits import check_resource_limit
 from ..database import get_db
 from ..models.orm import ScorerORM
 from ..models.schemas import Scorer, ScorerCreate, ScorerUpdate
@@ -16,7 +16,10 @@ def create_scorer(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Scorer:
-    enforce_limit(db, current_user.org_id, current_user.org_plan, "scorers", ScorerORM)
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "scorers",
+        ScorerORM, current_user.org_custom_limits,
+    )
     scorer = ScorerORM(**body.model_dump(), org_id=current_user.org_id, created_by_email=current_user.email)
     db.add(scorer)
     db.commit()

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
+from ..auth.limits import check_resource_limit
 from ..auth.utils import decrypt_api_key, encrypt_api_key
 from ..database import get_db
 from ..models.orm import ConnectionORM
@@ -73,6 +74,11 @@ def create_connection(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ConnectionResponse:
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "connections",
+        ConnectionORM, current_user.org_custom_limits,
+    )
+
     if body.type.value == "azure_openai":
         if not body.azure_endpoint:
             raise HTTPException(status_code=422, detail="azure_endpoint is required for azure_openai connections")

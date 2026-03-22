@@ -510,6 +510,7 @@ class AgentMessageSchema(BaseModel):
     chat_id: str
     role: str  # user | assistant
     content: str
+    tool_calls: list[dict] | None = None
     created_at: datetime
 
 

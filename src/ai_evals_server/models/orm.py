@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSON, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
@@ -26,7 +26,8 @@ class OrganizationORM(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    plan: Mapped[str] = mapped_column(String, nullable=False, default="free")  # free | plus | pro
+    plan: Mapped[str] = mapped_column(String, nullable=False, default="free")  # free | plus | pro | enterprise
+    custom_limits: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # enterprise per-org overrides
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     members: Mapped[list["MembershipORM"]] = relationship(
@@ -347,6 +348,7 @@ class AgentMessageORM(Base):
     chat_id: Mapped[str] = mapped_column(String, ForeignKey("agent_chats.id", ondelete="CASCADE"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String, nullable=False)  # user | assistant
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_calls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     chat: Mapped["AgentChatORM"] = relationship("AgentChatORM", back_populates="messages")
@@ -377,3 +379,13 @@ class PromptVersionORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     prompt: Mapped["PromptORM"] = relationship("PromptORM", back_populates="versions")
+
+
+class DailyUsageORM(Base):
+    __tablename__ = "daily_usage"
+
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)
+    date: Mapped[datetime] = mapped_column(Date(), primary_key=True)
+    playground_runs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    agent_messages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    scorer_evaluations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

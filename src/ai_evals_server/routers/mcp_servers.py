@@ -12,6 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
+from ..auth.limits import check_resource_limit
 from ..auth.utils import decrypt_api_key, encrypt_api_key
 from ..database import get_db
 from ..models.orm import McpServerORM
@@ -97,6 +98,11 @@ def create_mcp_server(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> McpServerSchema:
+    check_resource_limit(
+        db, current_user.org_id, current_user.org_plan, "mcp_servers",
+        McpServerORM, current_user.org_custom_limits,
+    )
+
     # Verify connection unless skipped (OAuth flow skips verification)
     if not body.skip_verify:
         headers = {"Authorization": f"Bearer {body.token}"} if body.token else {}
