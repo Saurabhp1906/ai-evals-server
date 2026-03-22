@@ -269,6 +269,8 @@ class ReviewORM(Base):
     playground_id: Mapped[str | None] = mapped_column(String, nullable=True)
     playground_name: Mapped[str | None] = mapped_column(String, nullable=True)
     run_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="playground")
+    agent_chat_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     rows: Mapped[list["ReviewRowORM"]] = relationship(
@@ -295,6 +297,72 @@ class ReviewRowORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     review: Mapped["ReviewORM"] = relationship("ReviewORM", back_populates="rows")
+
+
+class AgentORM(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    connection_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mcp_server_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    mcp_tool_filter: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    tools: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    summarize_after: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    chats: Mapped[list["AgentChatORM"]] = relationship(
+        "AgentChatORM", back_populates="agent", cascade="all, delete-orphan",
+        order_by="AgentChatORM.created_at",
+    )
+
+
+class AgentChatORM(Base):
+    __tablename__ = "agent_chats"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    agent: Mapped["AgentORM"] = relationship("AgentORM", back_populates="chats")
+    messages: Mapped[list["AgentMessageORM"]] = relationship(
+        "AgentMessageORM", back_populates="chat", cascade="all, delete-orphan",
+        order_by="AgentMessageORM.created_at",
+    )
+    summaries: Mapped[list["AgentChatSummaryORM"]] = relationship(
+        "AgentChatSummaryORM", back_populates="chat", cascade="all, delete-orphan",
+        order_by="AgentChatSummaryORM.created_at",
+    )
+
+
+class AgentMessageORM(Base):
+    __tablename__ = "agent_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    chat_id: Mapped[str] = mapped_column(String, ForeignKey("agent_chats.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)  # user | assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    chat: Mapped["AgentChatORM"] = relationship("AgentChatORM", back_populates="messages")
+
+
+class AgentChatSummaryORM(Base):
+    __tablename__ = "agent_chat_summaries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    chat_id: Mapped[str] = mapped_column(String, ForeignKey("agent_chats.id", ondelete="CASCADE"), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    from_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    to_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    chat: Mapped["AgentChatORM"] = relationship("AgentChatORM", back_populates="summaries")
 
 
 class PromptVersionORM(Base):

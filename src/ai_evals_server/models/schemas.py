@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +416,8 @@ class ReviewSchema(BaseModel):
     playground_id: str | None = None
     playground_name: str | None = None
     run_label: str | None = None
+    source: str = "playground"
+    agent_chat_id: str | None = None
     created_at: datetime
     rows: list[ReviewRowSchema] = Field(default_factory=list)
 
@@ -433,6 +435,8 @@ class ReviewCreate(BaseModel):
     playground_id: str | None = None
     playground_name: str | None = None
     run_label: str | None = None
+    source: str = "playground"
+    agent_chat_id: str | None = None
     rows: list[ReviewCreateRow] = Field(default_factory=list)
 
 
@@ -440,3 +444,95 @@ class ReviewRowUpdate(BaseModel):
     annotation: str | None = None
     rating: str | None = None
     expected_behavior: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------------
+
+class AgentCreate(BaseModel):
+    name: str
+    system_prompt: str = ""
+    connection_id: str | None = None
+    model: str | None = None
+    max_output_tokens: int | None = None
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
+    tools: list[str] = Field(default_factory=list)
+    summarize_after: int = Field(default=10, ge=2, le=20)
+
+    @field_validator("summarize_after")
+    @classmethod
+    def clamp_summarize_after(cls, v: int) -> int:
+        return max(2, min(20, v))
+
+
+class AgentUpdate(BaseModel):
+    name: str | None = None
+    system_prompt: str | None = None
+    connection_id: str | None = None
+    model: str | None = None
+    max_output_tokens: int | None = None
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
+    tools: list[str] | None = None
+    summarize_after: int | None = Field(default=None, ge=2, le=20)
+
+    @field_validator("summarize_after")
+    @classmethod
+    def clamp_summarize_after(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        return max(2, min(20, v))
+
+
+class AgentSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    system_prompt: str
+    connection_id: str | None = None
+    model: str | None = None
+    max_output_tokens: int | None = None
+    mcp_server_id: str | None = None
+    mcp_tool_filter: list[str] | None = None
+    tools: list[str]
+    summarize_after: int
+    created_at: datetime
+    created_by_email: str | None = None
+
+
+class AgentMessageSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    chat_id: str
+    role: str  # user | assistant
+    content: str
+    created_at: datetime
+
+
+class AgentChatSummarySchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    chat_id: str
+    content: str
+    from_message_id: str | None = None
+    to_message_id: str | None = None
+    created_at: datetime
+
+
+class AgentChatSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    created_at: datetime
+    messages: list[AgentMessageSchema] = Field(default_factory=list)
+    summaries: list[AgentChatSummarySchema] = Field(default_factory=list)
+
+
+class AgentSendMessageRequest(BaseModel):
+    content: str

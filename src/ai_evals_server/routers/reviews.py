@@ -21,6 +21,8 @@ def create_review(
         playground_id=body.playground_id,
         playground_name=body.playground_name,
         run_label=body.run_label,
+        source=body.source,
+        agent_chat_id=body.agent_chat_id,
     )
     db.add(review)
     db.flush()

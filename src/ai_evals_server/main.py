@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from .routers import prompts, datasets, scorers, playground, playgrounds, connections, organizations, invites, mcp_servers, reviews
+from .routers import prompts, datasets, scorers, playground, playgrounds, connections, organizations, invites, mcp_servers, reviews, agents
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -37,6 +37,7 @@ app.include_router(playground.router)
 app.include_router(playgrounds.router)
 app.include_router(mcp_servers.router)
 app.include_router(reviews.router)
+app.include_router(agents.router)
 
 
 
