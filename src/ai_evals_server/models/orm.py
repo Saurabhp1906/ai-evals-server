@@ -114,6 +114,7 @@ class PromptORM(Base):
         String, ForeignKey("mcp_servers.id", ondelete="SET NULL"), nullable=True
     )
     mcp_tool_filter: Mapped[list | None] = mapped_column(JSON, nullable=True)  # null = all tools
+    response_format: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # JSON schema for structured output
     connection: Mapped["ConnectionORM | None"] = relationship("ConnectionORM")
     versions: Mapped[list["PromptVersionORM"]] = relationship(
         "PromptVersionORM",

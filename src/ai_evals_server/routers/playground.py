@@ -71,14 +71,14 @@ OPENAI_TOOL_DEFINITIONS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 class LLMClient(Protocol):
-    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str: ...
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None, response_format: dict | None = None) -> str: ...
 
 
 class ClaudeClient:
     def __init__(self, api_key: str) -> None:
         self._client = anthropic.Anthropic(api_key=api_key)
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None, response_format: dict | None = None) -> str:
         kwargs: dict = {
             "model": model,
             "max_tokens": max_tokens if max_tokens is not None else 1024,
@@ -99,7 +99,7 @@ class ClaudeClient:
         text = "\n".join(parts).strip()
         return text
 
-    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str], response_format: dict | None = None) -> tuple[str, dict]:
         kwargs: dict = {
             "model": model,
             "max_tokens": max_tokens if max_tokens is not None else 1024,
@@ -138,20 +138,24 @@ class OpenAIChatClient:
     def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self._client = openai_lib.OpenAI(api_key=api_key, base_url=base_url)
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None, response_format: dict | None = None) -> str:
         kwargs: dict = {
             "model": model,
             "messages": [{"role": "user", "content": user_message}],
         }
+        if response_format is not None:
+            kwargs["response_format"] = {"type": "json_schema", "json_schema": {"name": "output", "schema": response_format, "strict": False}}
         # web_search not supported in Chat Completions — ignore tools silently
         response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip()
 
-    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str], response_format: dict | None = None) -> tuple[str, dict]:
         kwargs: dict = {
             "model": model,
             "messages": [{"role": "user", "content": user_message}],
         }
+        if response_format is not None:
+            kwargs["response_format"] = {"type": "json_schema", "json_schema": {"name": "output", "schema": response_format, "strict": False}}
         response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip(), _serialize_response(response)
 
@@ -161,13 +165,15 @@ class OpenAIResponsesClient:
     def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self._client = openai_lib.OpenAI(api_key=api_key, base_url=base_url)
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None, response_format: dict | None = None) -> str:
         kwargs: dict = {
             "model": model,
             "input": user_message,
         }
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
+        if response_format is not None:
+            kwargs["text"] = {"format": {"type": "json_schema", "name": "output", "schema": response_format, "strict": False}}
         tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
@@ -175,10 +181,12 @@ class OpenAIResponsesClient:
         response = self._client.responses.create(**kwargs)
         return (response.output_text or "").strip()
 
-    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str], response_format: dict | None = None) -> tuple[str, dict]:
         kwargs: dict = {"model": model, "input": user_message}
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
+        if response_format is not None:
+            kwargs["text"] = {"format": {"type": "json_schema", "name": "output", "schema": response_format, "strict": False}}
         tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
@@ -197,16 +205,20 @@ class AzureOpenAIChatClient:
         )
         self._deployment = azure_deployment
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None, response_format: dict | None = None) -> str:
         kwargs: dict = {
             "model": self._deployment,
             "messages": [{"role": "user", "content": user_message}],
         }
+        if response_format is not None:
+            kwargs["response_format"] = {"type": "json_schema", "json_schema": {"name": "output", "schema": response_format, "strict": False}}
         response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip()
 
-    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str], response_format: dict | None = None) -> tuple[str, dict]:
         kwargs: dict = {"model": self._deployment, "messages": [{"role": "user", "content": user_message}]}
+        if response_format is not None:
+            kwargs["response_format"] = {"type": "json_schema", "json_schema": {"name": "output", "schema": response_format, "strict": False}}
         response = _openai_chat_create(self._client, kwargs, max_tokens)
         return (response.choices[0].message.content or "").strip(), _serialize_response(response)
 
@@ -221,13 +233,15 @@ class AzureOpenAIResponsesClient:
         )
         self._deployment = azure_deployment
 
-    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None) -> str:
+    def complete(self, model: str, user_message: str, max_tokens: int | None = None, tools: list[str] | None = None, response_format: dict | None = None) -> str:
         kwargs: dict = {
             "model": self._deployment,
             "input": user_message,
         }
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
+        if response_format is not None:
+            kwargs["text"] = {"format": {"type": "json_schema", "name": "output", "schema": response_format, "strict": False}}
         tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
@@ -235,10 +249,12 @@ class AzureOpenAIResponsesClient:
         response = self._client.responses.create(**kwargs)
         return (response.output_text or "").strip()
 
-    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str]) -> tuple[str, dict]:
+    def complete_raw(self, model: str, user_message: str, max_tokens: int | None, tools: list[str], response_format: dict | None = None) -> tuple[str, dict]:
         kwargs: dict = {"model": self._deployment, "input": user_message}
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
+        if response_format is not None:
+            kwargs["text"] = {"format": {"type": "json_schema", "name": "output", "schema": response_format, "strict": False}}
         tool_defs = [OPENAI_TOOL_DEFINITIONS[t] for t in (tools or []) if t in OPENAI_TOOL_DEFINITIONS]
         if tool_defs:
             kwargs["tools"] = tool_defs
@@ -625,7 +641,7 @@ def run_single(
         else:
             client = _resolve_client(connection_id, db, use_responses_api=use_responses_api)
             model = _resolve_model(connection_id, db, model_override=prompt.model)
-            output, raw_output = client.complete_raw(model=model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
+            output, raw_output = client.complete_raw(model=model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools, response_format=prompt.response_format)
     except HTTPException:
         raise
     except Exception as exc:
@@ -704,7 +720,7 @@ def run_row(
                 raise HTTPException(status_code=404, detail="Prompt connection not found")
             output, tool_calls, _ = _run_with_mcp(prompt_conn, user_message, max_tokens, mcp_url, mcp_headers, body.mcp_tool_filter, use_responses_api=prompt.use_responses_api, model=prompt.model, prompt_tools=prompt.tools)
         else:
-            output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
+            output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools, response_format=prompt.response_format)
 
         scorer_message = _resolve_template(scorer.prompt_string, raw_input, variables, output=output)
         score = _run_scorer(scorer_conn, scorer_model, scorer_message)
@@ -785,7 +801,7 @@ def run_playground(
                     raise HTTPException(status_code=404, detail="Prompt connection not found")
                 output, tool_calls, _ = _run_with_mcp(prompt_conn, user_message, max_tokens, mcp_url, mcp_headers, body.mcp_tool_filter, use_responses_api=prompt.use_responses_api, model=prompt.model, prompt_tools=prompt.tools)
             else:
-                output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools)
+                output = prompt_client.complete(model=prompt_model, user_message=user_message, max_tokens=max_tokens, tools=prompt.tools, response_format=prompt.response_format)
 
             scorer_message = _resolve_template(scorer.prompt_string, raw_input, variables, output=output)
             score = _run_scorer(scorer_conn, scorer_model, scorer_message)

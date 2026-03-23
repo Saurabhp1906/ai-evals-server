@@ -18,6 +18,7 @@ class PromptCreate(BaseModel):
     model: str | None = None
     mcp_server_id: str | None = None
     mcp_tool_filter: list[str] | None = None  # null = all tools allowed
+    response_format: dict | None = None  # JSON schema for structured output
 
 
 class PromptUpdate(BaseModel):
@@ -29,6 +30,7 @@ class PromptUpdate(BaseModel):
     model: str | None = None
     mcp_server_id: str | None = None
     mcp_tool_filter: list[str] | None = None
+    response_format: dict | None = None  # JSON schema for structured output
 
 
 class Prompt(BaseModel):
@@ -43,6 +45,7 @@ class Prompt(BaseModel):
     model: str | None = None
     mcp_server_id: str | None = None
     mcp_tool_filter: list[str] | None = None
+    response_format: dict | None = None  # JSON schema for structured output
     created_at: datetime
     created_by_email: str | None = None
     latest_version_string: str | None = None  # derived from latest version
