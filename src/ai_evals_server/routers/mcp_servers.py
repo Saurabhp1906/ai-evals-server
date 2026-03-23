@@ -45,8 +45,48 @@ def _to_schema(server: McpServerORM) -> McpServerSchema:
     )
 
 
-def _headers(server: McpServerORM) -> dict[str, str]:
+def _refresh_oauth_token(server: McpServerORM, db: Session) -> None:
+    """Exchange refresh token for a new access token and update the DB."""
+    if not server.oauth_refresh_token:
+        return
+    metadata = _discover_oauth_metadata(server.url)
+    token_endpoint = metadata.get("token_endpoint")
+    if not token_endpoint:
+        raise ValueError("No token endpoint found during refresh")
+    client_id = server.oauth_client_id or ""
+    client_secret = decrypt_api_key(server.oauth_client_secret) if server.oauth_client_secret else None
+    data: dict[str, str] = {
+        "grant_type": "refresh_token",
+        "refresh_token": decrypt_api_key(server.oauth_refresh_token),
+        "client_id": client_id,
+    }
+    refresh_headers: dict[str, str] = {}
+    if client_secret:
+        creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        refresh_headers["Authorization"] = f"Basic {creds}"
+    resp = httpx.post(token_endpoint, data=data, headers=refresh_headers, timeout=30)
+    resp.raise_for_status()
+    tokens = resp.json()
+    access_token = tokens.get("access_token")
+    if not access_token:
+        raise ValueError("No access_token in refresh response")
+    server.oauth_access_token = encrypt_api_key(access_token)
+    if tokens.get("refresh_token"):
+        server.oauth_refresh_token = encrypt_api_key(tokens["refresh_token"])
+    if tokens.get("expires_in"):
+        server.oauth_token_expiry = datetime.now(timezone.utc) + timedelta(seconds=int(tokens["expires_in"]))
+    db.commit()
+
+
+def _get_auth_headers(server: McpServerORM, db: Session) -> dict[str, str]:
+    """Return auth headers, refreshing OAuth token if expired or close to expiry."""
     if server.oauth_access_token:
+        if (server.oauth_refresh_token and server.oauth_token_expiry and
+                datetime.now(timezone.utc) >= server.oauth_token_expiry - timedelta(seconds=60)):
+            try:
+                _refresh_oauth_token(server, db)
+            except Exception:
+                pass  # fall through and use the existing token
         return {"Authorization": f"Bearer {decrypt_api_key(server.oauth_access_token)}"}
     if server.token:
         return {"Authorization": f"Bearer {decrypt_api_key(server.token)}"}
@@ -149,7 +189,7 @@ def update_mcp_server(
         if body.token is not None:
             new_headers = {"Authorization": f"Bearer {body.token}"} if body.token else {}
         else:
-            new_headers = _headers(server)
+            new_headers = _get_auth_headers(server, db)
         _verify_connection(new_url, new_headers)
 
     if body.name is not None:
@@ -185,8 +225,10 @@ def start_oauth(
         raise HTTPException(status_code=502, detail="OAuth metadata missing authorization or token endpoint")
 
     # Use stored client_id or attempt dynamic client registration (RFC 7591)
+    # Re-register if we have a client_id but no secret — previous registration was public client
     client_id = server.oauth_client_id
-    if not client_id:
+    needs_registration = not client_id or (client_id and not server.oauth_client_secret)
+    if needs_registration:
         registration_endpoint = metadata.get("registration_endpoint")
         if not registration_endpoint:
             raise HTTPException(
@@ -194,18 +236,35 @@ def start_oauth(
                 detail="Server does not support dynamic client registration. Please provide a Client ID manually.",
             )
         try:
+            # Build registration payload from what the server advertises
+            supported_grants = metadata.get("grant_types_supported", ["authorization_code"])
+            supported_responses = metadata.get("response_types_supported", ["code"])
+            supported_auth_methods = metadata.get("token_endpoint_auth_methods_supported", [])
+
+            reg_payload: dict = {
+                "client_name": "Evalpeak",
+                "redirect_uris": [body.redirect_uri],
+                "grant_types": [g for g in ["authorization_code", "refresh_token"] if g in supported_grants],
+                "response_types": [r for r in ["code"] if r in supported_responses],
+            }
+            # Only set token_endpoint_auth_method if server advertises a preference
+            if supported_auth_methods:
+                # Prefer confidential client methods (get a secret) over public client (none)
+                for method in ["client_secret_post", "client_secret_basic", "none"]:
+                    if method in supported_auth_methods:
+                        reg_payload["token_endpoint_auth_method"] = method
+                        break
+
             reg_resp = httpx.post(
                 registration_endpoint,
-                json={
-                    "client_name": "AI Evals",
-                    "redirect_uris": [body.redirect_uri],
-                    "grant_types": ["authorization_code"],
-                    "response_types": ["code"],
-                    "token_endpoint_auth_method": "none",
-                },
+                json=reg_payload,
                 timeout=10,
             )
-            reg_resp.raise_for_status()
+            if not reg_resp.is_success:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Dynamic client registration failed ({reg_resp.status_code}): {reg_resp.text}",
+                )
             reg_data = reg_resp.json()
             client_id = reg_data.get("client_id")
             if not client_id:
@@ -274,19 +333,24 @@ def complete_oauth(
     token_endpoint = state_data["token_endpoint"]
     client_id = server.oauth_client_id
     client_secret = decrypt_api_key(server.oauth_client_secret) if server.oauth_client_secret else None
-
     try:
         data: dict[str, str] = {
             "grant_type": "authorization_code",
             "code": body.code,
             "redirect_uri": body.redirect_uri,
-            "client_id": client_id,
             "code_verifier": state_data["code_verifier"],
         }
         if client_secret:
+            # Send via both POST body (client_secret_post) and Basic auth header (client_secret_basic)
+            # to maximise compatibility — different servers check different places
+            data["client_id"] = client_id
             data["client_secret"] = client_secret
+            auth = (client_id, client_secret)
+        else:
+            data["client_id"] = client_id
+            auth = None
 
-        resp = httpx.post(token_endpoint, data=data, timeout=30)
+        resp = httpx.post(token_endpoint, data=data, auth=auth, timeout=30)
         resp.raise_for_status()
         tokens = resp.json()
     except httpx.HTTPStatusError as exc:
@@ -337,7 +401,7 @@ def list_mcp_tools(
     if not server or server.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    headers = _headers(server)
+    headers = _get_auth_headers(server, db)
 
     async def _fetch_tools():
         async with streamablehttp_client(server.url, headers=headers) as (read, write, _):

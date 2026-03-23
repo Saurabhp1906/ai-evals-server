@@ -550,9 +550,8 @@ def _resolve_mcp(mcp_server_id: str | None, db: Session) -> tuple[str, dict[str,
     mcp = db.get(McpServerORM, mcp_server_id)
     if not mcp:
         raise HTTPException(status_code=404, detail=f"MCP server '{mcp_server_id}' not found")
-    headers: dict[str, str] = {}
-    if mcp.token:
-        headers["Authorization"] = f"Bearer {decrypt_api_key(mcp.token)}"
+    from .mcp_servers import _get_auth_headers
+    headers = _get_auth_headers(mcp, db)
     return mcp.url, headers
 
 
