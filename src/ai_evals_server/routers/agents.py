@@ -19,6 +19,14 @@ from ..models.schemas import (
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
+_CLAUDE_TOOL_DEFS: dict[str, dict] = {
+    "web_search": {"type": "web_search_20250305", "name": "web_search"},
+}
+
+_OPENAI_TOOL_DEFS: dict[str, dict] = {
+    "web_search": {"type": "web_search"},
+}
+
 _DEFAULT_MODELS = {
     ConnectionType.claude: "claude-sonnet-4-6",
     ConnectionType.openai: "gpt-4o",
@@ -53,6 +61,62 @@ def _mcp_headers(mcp: McpServerORM) -> dict[str, str]:
     return {}
 
 
+async def _run_chat_with_mcp_responses_async(
+    agent: AgentORM,
+    llm_messages: list[dict],
+    conn: ConnectionORM,
+    mcp: McpServerORM,
+) -> tuple[str, list[dict]]:
+    """MCP tool loop via Responses API for agents (supports multi-turn history)."""
+    plain_key = decrypt_api_key(conn.api_key)
+    model = agent.model or _DEFAULT_MODELS.get(conn.type, "gpt-4o")
+    max_tokens = agent.max_output_tokens or 1024
+    tool_filter: list[str] | None = agent.mcp_tool_filter
+    recorded_calls: list[dict] = []
+
+    if conn.type == ConnectionType.azure_openai:
+        oa_client: openai_lib.OpenAI | openai_lib.AzureOpenAI = openai_lib.AzureOpenAI(
+            api_key=plain_key, azure_endpoint=conn.azure_endpoint or "", api_version=conn.azure_api_version,
+        )
+        deployment = conn.azure_deployment or model
+    else:
+        oa_client = openai_lib.OpenAI(api_key=plain_key, base_url=conn.base_url)
+        deployment = model
+
+    async with streamablehttp_client(mcp.url, headers=_mcp_headers(mcp)) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools_result = await session.list_tools()
+            available = [t for t in tools_result.tools if tool_filter is None or t.name in tool_filter]
+
+            openai_tools = (
+                [_OPENAI_TOOL_DEFS[t] for t in (agent.tools or []) if t in _OPENAI_TOOL_DEFS]
+                + [{"type": "function", "name": t.name, "description": t.description or "", "parameters": t.inputSchema} for t in available]
+            )
+            kwargs: dict = {"model": deployment, "input": llm_messages, "tools": openai_tools}
+            if agent.system_prompt:
+                kwargs["instructions"] = agent.system_prompt
+            if max_tokens:
+                kwargs["max_output_tokens"] = max_tokens
+
+            response = oa_client.responses.create(**kwargs)
+            while True:
+                function_calls = [item for item in response.output if item.type == "function_call"]
+                if not function_calls:
+                    break
+                tool_results = []
+                for fc in function_calls:
+                    args = json.loads(fc.arguments)
+                    result = await session.call_tool(fc.name, args)
+                    result_text = "\n".join(b.text for b in result.content if hasattr(b, "text"))
+                    recorded_calls.append({"name": fc.name, "input": args, "result": result_text})
+                    tool_results.append({"type": "function_call_output", "call_id": fc.call_id, "output": result_text})
+                response = oa_client.responses.create(
+                    model=deployment, previous_response_id=response.id, input=tool_results, tools=openai_tools,
+                )
+            return (response.output_text or "").strip(), recorded_calls
+
+
 async def _run_chat_with_mcp_async(
     agent: AgentORM,
     messages: list[AgentMessageORM],
@@ -66,6 +130,10 @@ async def _run_chat_with_mcp_async(
     llm_messages = _build_llm_messages(messages)
     recorded_calls: list[dict] = []
 
+    # Route to Responses API if enabled (OpenAI/Azure only)
+    if agent.use_responses_api and conn.type in (ConnectionType.openai, ConnectionType.azure_openai):
+        return await _run_chat_with_mcp_responses_async(agent, llm_messages, conn, mcp)
+
     async with streamablehttp_client(mcp.url, headers=_mcp_headers(mcp)) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -74,10 +142,10 @@ async def _run_chat_with_mcp_async(
 
             if conn.type == ConnectionType.claude:
                 client = anthropic.Anthropic(api_key=plain_key)
-                claude_tools = [
-                    {"name": t.name, "description": t.description or "", "input_schema": t.inputSchema}
-                    for t in available
-                ]
+                claude_tools = (
+                    [_CLAUDE_TOOL_DEFS[t] for t in (agent.tools or []) if t in _CLAUDE_TOOL_DEFS]
+                    + [{"name": t.name, "description": t.description or "", "input_schema": t.inputSchema} for t in available]
+                )
                 while True:
                     kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": llm_messages, "tools": claude_tools}
                     if agent.system_prompt:
@@ -172,11 +240,11 @@ def _run_chat(
         kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": llm_messages}
         if system:
             kwargs["system"] = system
+        claude_tool_defs = [_CLAUDE_TOOL_DEFS[t] for t in (agent.tools or []) if t in _CLAUDE_TOOL_DEFS]
+        if claude_tool_defs:
+            kwargs["tools"] = claude_tool_defs
         response = client.messages.create(**kwargs)
         return "\n".join(b.text for b in response.content if hasattr(b, "text")).strip(), []
-
-    if system:
-        llm_messages = [{"role": "system", "content": system}] + llm_messages
 
     if conn.type == ConnectionType.azure_openai:
         oa_client: openai_lib.OpenAI | openai_lib.AzureOpenAI = openai_lib.AzureOpenAI(
@@ -186,6 +254,22 @@ def _run_chat(
     else:
         oa_client = openai_lib.OpenAI(api_key=plain_key, base_url=conn.base_url)
         deployment = model
+
+    # Responses API path
+    if agent.use_responses_api:
+        kwargs_r: dict = {"model": deployment, "input": llm_messages}
+        if system:
+            kwargs_r["instructions"] = system
+        if max_tokens:
+            kwargs_r["max_output_tokens"] = max_tokens
+        oa_tool_defs = [_OPENAI_TOOL_DEFS[t] for t in (agent.tools or []) if t in _OPENAI_TOOL_DEFS]
+        if oa_tool_defs:
+            kwargs_r["tools"] = oa_tool_defs
+        resp_r = oa_client.responses.create(**kwargs_r)
+        return (resp_r.output_text or "").strip(), []
+
+    if system:
+        llm_messages = [{"role": "system", "content": system}] + llm_messages
 
     try:
         response = oa_client.chat.completions.create(model=deployment, messages=llm_messages, max_tokens=max_tokens)
@@ -205,7 +289,8 @@ def _summarize(agent: AgentORM, messages: list[AgentMessageORM], db: Session) ->
         role="user",
         content=f"Please summarize the following conversation in a few concise sentences, preserving key context:\n\n{conversation}",
     )
-    return _run_chat(agent, [summary_request], db)
+    text, _ = _run_chat(agent, [summary_request], db)
+    return text
 
 
 # ---------------------------------------------------------------------------

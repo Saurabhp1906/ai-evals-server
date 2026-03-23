@@ -460,6 +460,7 @@ class AgentCreate(BaseModel):
     mcp_tool_filter: list[str] | None = None
     tools: list[str] = Field(default_factory=list)
     summarize_after: int = Field(default=10, ge=2, le=20)
+    use_responses_api: bool = False
 
     @field_validator("summarize_after")
     @classmethod
@@ -477,6 +478,7 @@ class AgentUpdate(BaseModel):
     mcp_tool_filter: list[str] | None = None
     tools: list[str] | None = None
     summarize_after: int | None = Field(default=None, ge=2, le=20)
+    use_responses_api: bool | None = None
 
     @field_validator("summarize_after")
     @classmethod
@@ -499,6 +501,7 @@ class AgentSchema(BaseModel):
     mcp_tool_filter: list[str] | None = None
     tools: list[str]
     summarize_after: int
+    use_responses_api: bool
     created_at: datetime
     created_by_email: str | None = None
 

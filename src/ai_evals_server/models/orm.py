@@ -314,6 +314,7 @@ class AgentORM(Base):
     mcp_tool_filter: Mapped[list | None] = mapped_column(JSON, nullable=True)
     tools: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     summarize_after: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    use_responses_api: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     created_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
