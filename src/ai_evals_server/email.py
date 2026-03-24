@@ -3,7 +3,7 @@ import resend
 
 resend.api_key = os.environ.get("RESEND_API_KEY", "")
 
-_FROM = os.environ.get("RESEND_FROM", "EvalPeak <noreply@yourdomain.com>")
+_FROM = os.environ.get("RESEND_FROM", "Evalpeak <noreply@evalpeak.com>")
 _APP_URL = os.environ.get("APP_URL", "http://localhost:5173")
 
 
@@ -16,7 +16,7 @@ def send_invite_email(to_email: str, org_name: str, token: str) -> None:
     resend.Emails.send({
         "from": _FROM,
         "to": [to_email],
-        "subject": f"You're invited to join {org_name} on EvalPeak",
+        "subject": f"You're invited to join {org_name} on Evalpeak",
         "html": f"""
 <!DOCTYPE html>
 <html>
