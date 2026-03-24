@@ -12,6 +12,7 @@ from ..models.schemas import (
     PlaygroundUpdate,
     SaveRunRequest,
 )
+from .common import get_org_resource, update_resource
 
 router = APIRouter(prefix="/playgrounds", tags=["playgrounds"])
 
@@ -48,10 +49,7 @@ def get_playground(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlaygroundSchema:
-    pg = db.get(PlaygroundORM, playground_id)
-    if not pg or pg.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Playground not found")
-    return PlaygroundSchema.model_validate(pg)
+    return PlaygroundSchema.model_validate(get_org_resource(db, PlaygroundORM, playground_id, current_user, "Playground not found"))
 
 
 @router.put("/{playground_id}", response_model=PlaygroundSchema)
@@ -61,13 +59,8 @@ def update_playground(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlaygroundSchema:
-    pg = db.get(PlaygroundORM, playground_id)
-    if not pg or pg.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Playground not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(pg, field, value)
-    db.commit()
-    db.refresh(pg)
+    pg = get_org_resource(db, PlaygroundORM, playground_id, current_user, "Playground not found")
+    update_resource(db, pg, body)
     return PlaygroundSchema.model_validate(pg)
 
 
@@ -77,9 +70,7 @@ def delete_playground(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    pg = db.get(PlaygroundORM, playground_id)
-    if not pg or pg.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Playground not found")
+    pg = get_org_resource(db, PlaygroundORM, playground_id, current_user, "Playground not found")
     db.delete(pg)
     db.commit()
 
@@ -92,9 +83,7 @@ def save_run(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlaygroundRunSchema:
     require_feature(current_user.org_plan, "run_history", current_user.org_custom_limits)
-    pg = db.get(PlaygroundORM, playground_id)
-    if not pg or pg.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Playground not found")
+    pg = get_org_resource(db, PlaygroundORM, playground_id, current_user, "Playground not found")
 
     run = PlaygroundRunORM(
         playground_id=playground_id,
@@ -132,9 +121,7 @@ def delete_run(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    pg = db.get(PlaygroundORM, playground_id)
-    if not pg or pg.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Playground not found")
+    get_org_resource(db, PlaygroundORM, playground_id, current_user, "Playground not found")
     run = db.get(PlaygroundRunORM, run_id)
     if not run or run.playground_id != playground_id:
         raise HTTPException(status_code=404, detail="Run not found")

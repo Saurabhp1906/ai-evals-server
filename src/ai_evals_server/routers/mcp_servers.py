@@ -16,6 +16,7 @@ from ..auth.limits import check_resource_limit
 from ..auth.utils import decrypt_api_key, encrypt_api_key
 from ..database import get_db
 from ..models.orm import McpServerORM
+from .common import get_org_resource
 from ..models.schemas import (
     McpServerCreate,
     McpServerSchema,
@@ -111,16 +112,58 @@ def _verify_connection(url: str, headers: dict[str, str]) -> None:
 
 
 def _discover_oauth_metadata(url: str) -> dict:
-    """Fetch OAuth 2.0 metadata from MCP server's well-known endpoint."""
+    """Fetch OAuth 2.0 metadata from MCP server's well-known endpoint.
+
+    Tries, in order:
+    1. origin + /.well-known/oauth-authorization-server  (standard)
+    2. path-aware RFC 8414 variant derived from the MCP URL path
+    3. resource_metadata discovery via WWW-Authenticate header
+    """
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    for base in [origin, url.rstrip('/')]:
+
+    # Build path-aware well-known URL: strip the terminal path segment (e.g. /mcp)
+    # so that /.well-known/oauth-authorization-server/<path-prefix> is tried
+    path_prefix = parsed.path.rstrip("/")
+    if path_prefix.endswith("/mcp"):
+        path_prefix = path_prefix[: -len("/mcp")]
+
+    candidates = [
+        f"{origin}/.well-known/oauth-authorization-server",
+        f"{origin}/.well-known/oauth-authorization-server{path_prefix}",
+    ]
+
+    for candidate in candidates:
         try:
-            resp = httpx.get(f"{base}/.well-known/oauth-authorization-server", follow_redirects=True, timeout=10)
+            resp = httpx.get(candidate, follow_redirects=True, timeout=10)
             if resp.status_code == 200:
                 return resp.json()
-        except Exception as e:
+        except Exception:
             continue
+
+    # Fallback: follow WWW-Authenticate → resource_metadata → authorization_servers
+    try:
+        probe = httpx.get(url, timeout=10)
+        www_auth = probe.headers.get("WWW-Authenticate", "")
+        if "resource_metadata" in www_auth:
+            import re
+            m = re.search(r'resource_metadata="([^"]+)"', www_auth)
+            if m:
+                resource_meta = httpx.get(m.group(1), follow_redirects=True, timeout=10).json()
+                for auth_server in resource_meta.get("authorization_servers", []):
+                    try:
+                        meta = httpx.get(
+                            f"{str(auth_server).rstrip('/')}/.well-known/oauth-authorization-server",
+                            follow_redirects=True,
+                            timeout=10,
+                        )
+                        if meta.status_code == 200:
+                            return meta.json()
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
     raise HTTPException(status_code=502, detail="No OAuth metadata found at this MCP server URL")
 
 
@@ -180,9 +223,7 @@ def update_mcp_server(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> McpServerSchema:
-    server = db.get(McpServerORM, server_id)
-    if not server or server.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    server = get_org_resource(db, McpServerORM, server_id, current_user, "MCP server not found")
 
     if not body.skip_verify and (body.url is not None or body.token is not None):
         new_url = body.url if body.url is not None else server.url
@@ -214,9 +255,7 @@ def start_oauth(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> OAuthStartResponse:
-    server = db.get(McpServerORM, server_id)
-    if not server or server.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    server = get_org_resource(db, McpServerORM, server_id, current_user, "MCP server not found")
 
     metadata = _discover_oauth_metadata(server.url)
     auth_endpoint = metadata.get("authorization_endpoint")
@@ -225,9 +264,8 @@ def start_oauth(
         raise HTTPException(status_code=502, detail="OAuth metadata missing authorization or token endpoint")
 
     # Use stored client_id or attempt dynamic client registration (RFC 7591)
-    # Re-register if we have a client_id but no secret — previous registration was public client
     client_id = server.oauth_client_id
-    needs_registration = not client_id or (client_id and not server.oauth_client_secret)
+    needs_registration = not client_id
     if needs_registration:
         registration_endpoint = metadata.get("registration_endpoint")
         if not registration_endpoint:
@@ -247,13 +285,14 @@ def start_oauth(
                 "grant_types": [g for g in ["authorization_code", "refresh_token"] if g in supported_grants],
                 "response_types": [r for r in ["code"] if r in supported_responses],
             }
-            # Only set token_endpoint_auth_method if server advertises a preference
+            # Use the auth method the server prefers; default to none (public client)
             if supported_auth_methods:
-                # Prefer confidential client methods (get a secret) over public client (none)
                 for method in ["client_secret_post", "client_secret_basic", "none"]:
                     if method in supported_auth_methods:
                         reg_payload["token_endpoint_auth_method"] = method
                         break
+            else:
+                reg_payload["token_endpoint_auth_method"] = "none"
 
             reg_resp = httpx.post(
                 registration_endpoint,
@@ -317,9 +356,7 @@ def complete_oauth(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    server = db.get(McpServerORM, server_id)
-    if not server or server.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    server = get_org_resource(db, McpServerORM, server_id, current_user, "MCP server not found")
 
     state_data = _oauth_states.get(body.state)
     if not state_data:
@@ -340,19 +377,29 @@ def complete_oauth(
             "redirect_uri": body.redirect_uri,
             "code_verifier": state_data["code_verifier"],
         }
+        data["client_id"] = client_id
         if client_secret:
-            # Send via both POST body (client_secret_post) and Basic auth header (client_secret_basic)
-            # to maximise compatibility — different servers check different places
-            data["client_id"] = client_id
             data["client_secret"] = client_secret
-            auth = (client_id, client_secret)
-        else:
-            data["client_id"] = client_id
-            auth = None
 
+        auth = (client_id, client_secret) if client_secret else None
         resp = httpx.post(token_endpoint, data=data, auth=auth, timeout=30)
-        resp.raise_for_status()
+        if not resp.is_success:
+            resp_text = resp.text
+            try:
+                err = resp.json()
+                if err.get("error") == "invalid_client" and "secret" in err.get("error_description", "").lower():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This MCP server requires a Client Secret. Please add it in the MCP server settings and try again.",
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail=f"Token exchange failed: {resp_text}")
         tokens = resp.json()
+    except HTTPException:
+        raise
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc.response.text}")
     except Exception as exc:
@@ -382,9 +429,7 @@ def revoke_oauth(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    server = db.get(McpServerORM, server_id)
-    if not server or server.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    server = get_org_resource(db, McpServerORM, server_id, current_user, "MCP server not found")
     server.oauth_access_token = None
     server.oauth_refresh_token = None
     server.oauth_token_expiry = None
@@ -397,9 +442,7 @@ def list_mcp_tools(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[McpToolSchema]:
-    server = db.get(McpServerORM, server_id)
-    if not server or server.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    server = get_org_resource(db, McpServerORM, server_id, current_user, "MCP server not found")
 
     headers = _get_auth_headers(server, db)
 
@@ -431,8 +474,6 @@ def delete_mcp_server(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    server = db.get(McpServerORM, server_id)
-    if not server or server.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    server = get_org_resource(db, McpServerORM, server_id, current_user, "MCP server not found")
     db.delete(server)
     db.commit()

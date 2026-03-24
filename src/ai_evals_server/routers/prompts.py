@@ -6,6 +6,7 @@ from ..auth.limits import check_resource_limit
 from ..database import get_db
 from ..models.orm import PromptORM, PromptVersionORM
 from ..models.schemas import Prompt, PromptCreate, PromptUpdate, PromptVersion, PromptVersionCreate, PromptVersionUpdate
+from .common import get_org_resource, update_resource
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
 
@@ -25,6 +26,7 @@ def _to_prompt_response(prompt: PromptORM) -> Prompt:
         model=prompt.model,
         mcp_server_id=prompt.mcp_server_id,
         mcp_tool_filter=prompt.mcp_tool_filter,
+        response_format=prompt.response_format,
         created_at=prompt.created_at,
         created_by_email=prompt.created_by_email,
         latest_version_string=latest_version_string,
@@ -67,10 +69,7 @@ def get_prompt(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Prompt:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    return _to_prompt_response(prompt)
+    return _to_prompt_response(get_org_resource(db, PromptORM, prompt_id, current_user, "Prompt not found"))
 
 
 @router.put("/{prompt_id}", response_model=Prompt)
@@ -80,13 +79,8 @@ def update_prompt(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Prompt:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(prompt, field, value)
-    db.commit()
-    db.refresh(prompt)
+    prompt = get_org_resource(db, PromptORM, prompt_id, current_user, "Prompt not found")
+    update_resource(db, prompt, body)
     return _to_prompt_response(prompt)
 
 
@@ -96,9 +90,7 @@ def delete_prompt(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
+    prompt = get_org_resource(db, PromptORM, prompt_id, current_user, "Prompt not found")
     db.delete(prompt)
     db.commit()
 
@@ -107,15 +99,21 @@ def delete_prompt(
 # Prompt Versions
 # ---------------------------------------------------------------------------
 
+def _get_prompt_and_version(prompt_id: str, version_id: str, db: Session, current_user: CurrentUser):
+    prompt = get_org_resource(db, PromptORM, prompt_id, current_user, "Prompt not found")
+    version = db.get(PromptVersionORM, version_id)
+    if not version or version.prompt_id != prompt_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return prompt, version
+
+
 @router.get("/{prompt_id}/versions", response_model=list[PromptVersion])
 def list_versions(
     prompt_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[PromptVersion]:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
+    get_org_resource(db, PromptORM, prompt_id, current_user, "Prompt not found")
     rows = (
         db.query(PromptVersionORM)
         .filter(PromptVersionORM.prompt_id == prompt_id)
@@ -132,9 +130,7 @@ def create_version(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PromptVersion:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
+    get_org_resource(db, PromptORM, prompt_id, current_user, "Prompt not found")
     check_resource_limit(
         db, current_user.org_id, current_user.org_plan, "prompt_versions",
         PromptVersionORM, current_user.org_custom_limits,
@@ -154,12 +150,7 @@ def get_version(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PromptVersion:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    version = db.get(PromptVersionORM, version_id)
-    if not version or version.prompt_id != prompt_id:
-        raise HTTPException(status_code=404, detail="Version not found")
+    _, version = _get_prompt_and_version(prompt_id, version_id, db, current_user)
     return PromptVersion.model_validate(version)
 
 
@@ -171,12 +162,7 @@ def update_version(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PromptVersion:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    version = db.get(PromptVersionORM, version_id)
-    if not version or version.prompt_id != prompt_id:
-        raise HTTPException(status_code=404, detail="Version not found")
+    _, version = _get_prompt_and_version(prompt_id, version_id, db, current_user)
     version.prompt_string = body.prompt_string
     db.commit()
     db.refresh(version)
@@ -190,11 +176,6 @@ def delete_version(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    prompt = db.get(PromptORM, prompt_id)
-    if not prompt or prompt.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    version = db.get(PromptVersionORM, version_id)
-    if not version or version.prompt_id != prompt_id:
-        raise HTTPException(status_code=404, detail="Version not found")
+    _, version = _get_prompt_and_version(prompt_id, version_id, db, current_user)
     db.delete(version)
     db.commit()

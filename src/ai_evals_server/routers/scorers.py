@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..auth.dependencies import CurrentUser, get_current_user
@@ -6,6 +6,7 @@ from ..auth.limits import check_resource_limit
 from ..database import get_db
 from ..models.orm import ScorerORM
 from ..models.schemas import Scorer, ScorerCreate, ScorerUpdate
+from .common import get_org_resource, update_resource
 
 router = APIRouter(prefix="/scorers", tags=["scorers"])
 
@@ -42,10 +43,7 @@ def get_scorer(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Scorer:
-    scorer = db.get(ScorerORM, scorer_id)
-    if not scorer or scorer.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Scorer not found")
-    return Scorer.model_validate(scorer)
+    return Scorer.model_validate(get_org_resource(db, ScorerORM, scorer_id, current_user, "Scorer not found"))
 
 
 @router.put("/{scorer_id}", response_model=Scorer)
@@ -55,13 +53,8 @@ def update_scorer(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Scorer:
-    scorer = db.get(ScorerORM, scorer_id)
-    if not scorer or scorer.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Scorer not found")
-    for field, value in body.model_dump(exclude_none=True).items():
-        setattr(scorer, field, value)
-    db.commit()
-    db.refresh(scorer)
+    scorer = get_org_resource(db, ScorerORM, scorer_id, current_user, "Scorer not found")
+    update_resource(db, scorer, body)
     return Scorer.model_validate(scorer)
 
 
@@ -71,8 +64,6 @@ def delete_scorer(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    scorer = db.get(ScorerORM, scorer_id)
-    if not scorer or scorer.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Scorer not found")
+    scorer = get_org_resource(db, ScorerORM, scorer_id, current_user, "Scorer not found")
     db.delete(scorer)
     db.commit()

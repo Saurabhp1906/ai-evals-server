@@ -6,6 +6,7 @@ from ..auth.limits import _get_limit, _NEXT_PLAN, check_resource_limit
 from ..database import get_db
 from ..models.orm import DatasetORM, DatasetRowORM
 from ..models.schemas import Dataset, DatasetCreate, DatasetRowCreate, DatasetRowUpdate, DatasetUpdate
+from .common import get_org_resource, update_resource
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -42,10 +43,7 @@ def get_dataset(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Dataset:
-    dataset = db.get(DatasetORM, dataset_id)
-    if not dataset or dataset.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    return Dataset.model_validate(dataset)
+    return Dataset.model_validate(get_org_resource(db, DatasetORM, dataset_id, current_user, "Dataset not found"))
 
 
 @router.put("/{dataset_id}", response_model=Dataset)
@@ -55,13 +53,8 @@ def update_dataset(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Dataset:
-    dataset = db.get(DatasetORM, dataset_id)
-    if not dataset or dataset.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    for field, value in body.model_dump(exclude_none=True).items():
-        setattr(dataset, field, value)
-    db.commit()
-    db.refresh(dataset)
+    dataset = get_org_resource(db, DatasetORM, dataset_id, current_user, "Dataset not found")
+    update_resource(db, dataset, body)
     return Dataset.model_validate(dataset)
 
 
@@ -71,9 +64,7 @@ def delete_dataset(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    dataset = db.get(DatasetORM, dataset_id)
-    if not dataset or dataset.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    dataset = get_org_resource(db, DatasetORM, dataset_id, current_user, "Dataset not found")
     db.delete(dataset)
     db.commit()
 
@@ -87,9 +78,7 @@ def add_rows(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Dataset:
-    dataset = db.get(DatasetORM, dataset_id)
-    if not dataset or dataset.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    dataset = get_org_resource(db, DatasetORM, dataset_id, current_user, "Dataset not found")
 
     limit = _get_limit(current_user.org_plan, "resources", "rows_per_dataset", current_user.org_custom_limits)
     if limit is not None:
@@ -128,9 +117,7 @@ def update_row(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Dataset:
-    dataset = db.get(DatasetORM, dataset_id)
-    if not dataset or dataset.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    dataset = get_org_resource(db, DatasetORM, dataset_id, current_user, "Dataset not found")
     row = db.get(DatasetRowORM, row_id)
     if not row or row.dataset_id != dataset_id:
         raise HTTPException(status_code=404, detail="Row not found")
@@ -148,9 +135,7 @@ def delete_row(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Dataset:
-    dataset = db.get(DatasetORM, dataset_id)
-    if not dataset or dataset.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    dataset = get_org_resource(db, DatasetORM, dataset_id, current_user, "Dataset not found")
     row = db.get(DatasetRowORM, row_id)
     if not row or row.dataset_id != dataset_id:
         raise HTTPException(status_code=404, detail="Row not found")

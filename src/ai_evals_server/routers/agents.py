@@ -16,29 +16,15 @@ from ..models.schemas import (
     AgentChatSchema, AgentCreate, AgentSchema, AgentSendMessageRequest, AgentUpdate,
     ConnectionType,
 )
+from .llm_clients import CLAUDE_TOOL_DEFINITIONS as _CLAUDE_TOOL_DEFS, OPENAI_TOOL_DEFINITIONS as _OPENAI_TOOL_DEFS, _DEFAULT_MODELS
+from .mcp_servers import _get_auth_headers as _mcp_headers_with_refresh
+from .common import get_org_resource
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
-_CLAUDE_TOOL_DEFS: dict[str, dict] = {
-    "web_search": {"type": "web_search_20250305", "name": "web_search"},
-}
-
-_OPENAI_TOOL_DEFS: dict[str, dict] = {
-    "web_search": {"type": "web_search"},
-}
-
-_DEFAULT_MODELS = {
-    ConnectionType.claude: "claude-sonnet-4-6",
-    ConnectionType.openai: "gpt-4o",
-    ConnectionType.azure_openai: "",
-}
-
 
 def _get_agent(agent_id: str, db: Session, current_user: CurrentUser) -> AgentORM:
-    agent = db.get(AgentORM, agent_id)
-    if not agent or agent.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    return get_org_resource(db, AgentORM, agent_id, current_user, "Agent not found")
 
 
 def _build_llm_messages(messages: list[AgentMessageORM]) -> list[dict]:
@@ -53,19 +39,12 @@ def _build_llm_messages(messages: list[AgentMessageORM]) -> list[dict]:
     return result
 
 
-def _mcp_headers(mcp: McpServerORM) -> dict[str, str]:
-    if mcp.oauth_access_token:
-        return {"Authorization": f"Bearer {decrypt_api_key(mcp.oauth_access_token)}"}
-    if mcp.token:
-        return {"Authorization": f"Bearer {decrypt_api_key(mcp.token)}"}
-    return {}
-
-
 async def _run_chat_with_mcp_responses_async(
     agent: AgentORM,
     llm_messages: list[dict],
     conn: ConnectionORM,
     mcp: McpServerORM,
+    db: Session,
 ) -> tuple[str, list[dict]]:
     """MCP tool loop via Responses API for agents (supports multi-turn history)."""
     plain_key = decrypt_api_key(conn.api_key)
@@ -83,7 +62,7 @@ async def _run_chat_with_mcp_responses_async(
         oa_client = openai_lib.OpenAI(api_key=plain_key, base_url=conn.base_url)
         deployment = model
 
-    async with streamablehttp_client(mcp.url, headers=_mcp_headers(mcp)) as (read, write, _):
+    async with streamablehttp_client(mcp.url, headers=_mcp_headers_with_refresh(mcp, db)) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools_result = await session.list_tools()
@@ -122,6 +101,7 @@ async def _run_chat_with_mcp_async(
     messages: list[AgentMessageORM],
     conn: ConnectionORM,
     mcp: McpServerORM,
+    db: Session,
 ) -> tuple[str, list[dict]]:
     plain_key = decrypt_api_key(conn.api_key)
     model = agent.model or _DEFAULT_MODELS.get(conn.type, "claude-sonnet-4-6")
@@ -132,9 +112,9 @@ async def _run_chat_with_mcp_async(
 
     # Route to Responses API if enabled (OpenAI/Azure only)
     if agent.use_responses_api and conn.type in (ConnectionType.openai, ConnectionType.azure_openai):
-        return await _run_chat_with_mcp_responses_async(agent, llm_messages, conn, mcp)
+        return await _run_chat_with_mcp_responses_async(agent, llm_messages, conn, mcp, db)
 
-    async with streamablehttp_client(mcp.url, headers=_mcp_headers(mcp)) as (read, write, _):
+    async with streamablehttp_client(mcp.url, headers=_mcp_headers_with_refresh(mcp, db)) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools_result = await session.list_tools()
@@ -226,7 +206,7 @@ def _run_chat(
     if agent.mcp_server_id:
         mcp = db.get(McpServerORM, agent.mcp_server_id)
         if mcp:
-            return asyncio.run(_run_chat_with_mcp_async(agent, messages, conn, mcp))
+            return asyncio.run(_run_chat_with_mcp_async(agent, messages, conn, mcp, db))
 
     # Plain LLM path (no MCP, no tool calls)
     plain_key = decrypt_api_key(conn.api_key)

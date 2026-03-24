@@ -9,6 +9,7 @@ from ..auth.limits import check_feature_flag, _get_limit, _NEXT_PLAN
 from ..database import get_db
 from ..email import send_invite_email
 from ..models.orm import InviteORM, MembershipORM, OrganizationORM
+from .common import get_org_resource
 
 router = APIRouter(prefix="/invites", tags=["invites"])
 
@@ -119,9 +120,7 @@ def revoke_invite(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_admin),
 ) -> None:
-    invite = db.get(InviteORM, invite_id)
-    if not invite or invite.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Invite not found")
+    invite = get_org_resource(db, InviteORM, invite_id, current_user, "Invite not found")
     db.delete(invite)
     db.commit()
 

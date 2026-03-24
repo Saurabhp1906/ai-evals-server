@@ -5,6 +5,7 @@ from ..auth.dependencies import CurrentUser, get_current_user
 from ..database import get_db
 from ..models.orm import ReviewORM, ReviewRowORM
 from ..models.schemas import ReviewCreate, ReviewRowUpdate, ReviewSchema
+from .common import get_org_resource
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
 
@@ -57,10 +58,7 @@ def get_review(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ReviewSchema:
-    review = db.get(ReviewORM, review_id)
-    if not review or review.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Review not found")
-    return ReviewSchema.model_validate(review)
+    return ReviewSchema.model_validate(get_org_resource(db, ReviewORM, review_id, current_user, "Review not found"))
 
 
 @router.patch("/{review_id}/rows/{row_id}", response_model=ReviewSchema)
@@ -71,10 +69,7 @@ def update_review_row(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ReviewSchema:
-    review = db.get(ReviewORM, review_id)
-    if not review or review.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Review not found")
-
+    review = get_org_resource(db, ReviewORM, review_id, current_user, "Review not found")
     row = db.get(ReviewRowORM, row_id)
     if not row or row.review_id != review_id:
         raise HTTPException(status_code=404, detail="Row not found")
@@ -97,8 +92,6 @@ def delete_review(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    review = db.get(ReviewORM, review_id)
-    if not review or review.org_id != current_user.org_id:
-        raise HTTPException(status_code=404, detail="Review not found")
+    review = get_org_resource(db, ReviewORM, review_id, current_user, "Review not found")
     db.delete(review)
     db.commit()
